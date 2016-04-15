@@ -15,7 +15,7 @@ type MemoryDump() =
     member this.HeapObjects with get() = heapObjects
 
     member this.Load() = 
-        use target = DataTarget.LoadCrashDump(@"ConsoleDump.exe.dmp")
+        use target = DataTarget.LoadCrashDump(@"..\..\..\..\data\ConsoleDump.exe.dmp")
         for version in target.ClrVersions do
             let dacInfo = version.DacInfo
             let runtime = version.CreateRuntime()
