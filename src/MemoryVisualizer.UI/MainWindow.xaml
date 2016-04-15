@@ -33,7 +33,7 @@
                   VerticalAlignment="Top" 
                   Grid.Row="2" ResizeBehavior="PreviousAndNext"
                   Height="5" Background="#FFBCBCBC"/>
-            <Label Content="Graph" Grid.Row="3" />
+            <TextBox Text="{Binding Graph}" Grid.Row="3" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" />
         </Grid>
     </Grid>
 </Window>
