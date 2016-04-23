@@ -8,13 +8,13 @@ open Models
 open System.ComponentModel
 open System.Text
 
-type FuncCommand (canExec:(obj -> bool), doExec:(obj -> unit)) =     
-        let theEvent = new DelegateEvent<EventHandler>()     
-        interface ICommand with         
-            [<CLIEvent>]         
-            member x.CanExecuteChanged = theEvent.Publish         
-            member x.CanExecute arg = canExec(arg)         
-            member x.Execute arg = doExec(arg)
+type CommandHandler (action:(obj -> unit), canExecute:(obj -> bool)) =   
+    member x.event = new DelegateEvent<EventHandler>() 
+    interface ICommand with         
+        [<CLIEvent>]         
+        member x.CanExecuteChanged = x.event.Publish
+        member x.CanExecute arg = canExecute(arg)         
+        member x.Execute arg = action(arg)
 
 type MainViewModel() = 
     let propertyChangedEvent = new DelegateEvent<PropertyChangedEventHandler>()
@@ -27,11 +27,7 @@ type MainViewModel() =
 
     member val Graph : string = "Test" with get, set
 
-    member x.ExecuteCommand = 
-        new FuncCommand(
-            ( fun _ -> true ),
-            ( fun _ -> x.ExecuteQuery )
-        )
+    member x.ExecuteCommand = new CommandHandler((fun _ -> x.ExecuteQuery), ( fun _ -> true ))
 
     member x.ExecuteQuery =
         let dump = new MemoryDump()
