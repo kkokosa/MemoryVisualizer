@@ -16,6 +16,9 @@ type MemoryDump() =
 
     member this.Load() = 
         use target = DataTarget.LoadCrashDump(@"..\..\..\..\data\ConsoleDump.exe.dmp")
+        target.SymbolLocator.SymbolPath <- @"SRV*http://msdl.microsoft.com/download/symbols"
+        target.SymbolLocator.SymbolCache <- @"c:\symbols"
+        //target.SymbolLocator.Timeout <- 1000 * 60 * 5
         for version in target.ClrVersions do
             let dacInfo = version.DacInfo
             let runtime = version.CreateRuntime()
