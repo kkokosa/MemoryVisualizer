@@ -14,7 +14,7 @@ type MemoryDump() =
 
     member this.HeapObjects with get() = heapObjects
 
-    member this.Load() = 
+    member this.Load() = async {
         use target = DataTarget.LoadCrashDump(@"..\..\..\..\data\ConsoleDump.exe.dmp")
         target.SymbolLocator.SymbolPath <- @"SRV*http://msdl.microsoft.com/download/symbols"
         target.SymbolLocator.SymbolCache <- @"c:\symbols"
@@ -34,7 +34,7 @@ type MemoryDump() =
                 heapObjects.Add(heapObject)
                 ignore()
         ()
-
+    }
 
 
 

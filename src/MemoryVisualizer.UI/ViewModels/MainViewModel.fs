@@ -31,7 +31,7 @@ type MainViewModel() =
 
     member x.ExecuteQuery =
         let dump = new MemoryDump()
-        dump.Load()
+        dump.Load() |> Async.RunSynchronously 
         let sb = new StringBuilder()
         for obj in dump.HeapObjects do
             sb.AppendFormat("[{0:X}] {1} ({2}): {3}\r\n", obj.Address, obj.TypeName, obj.Size, obj.Value) |> ignore
