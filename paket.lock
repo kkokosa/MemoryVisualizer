@@ -1,0 +1,8 @@
+FRAMEWORK: >= NET45
+NUGET
+  remote: https://www.nuget.org/api/v2
+  specs:
+    Expression.Blend.Sdk (1.0.2)
+    FsXaml.Wpf (0.9.9)
+      Expression.Blend.Sdk (>= 1.0.2)
+    Microsoft.Diagnostics.Runtime (0.8.31-beta)

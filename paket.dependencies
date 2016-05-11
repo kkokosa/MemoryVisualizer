@@ -1,0 +1,7 @@
+source https://www.myget.org/F/roslyn-nightly/
+source https://www.myget.org/F/dotnet-core
+source https://www.nuget.org/api/v2/
+framework >= net45
+
+nuget FsXaml.Wpf 0.9.9
+nuget Microsoft.Diagnostics.Runtime 0.8.31-beta
