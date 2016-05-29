@@ -33,7 +33,16 @@
                   VerticalAlignment="Top" 
                   Grid.Row="2" ResizeBehavior="PreviousAndNext"
                   Height="5" Background="#FFBCBCBC"/>
-            <TextBox Text="{Binding Graph}" Grid.Row="3" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" />
+            <TabControl x:Name="mainTabControl" Grid.Row="3" >
+                <TabItem Header="Output">
+                    <Grid Background="#FFE5E5E5">
+                        <TextBox Text="{Binding Graph}" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" />
+                    </Grid>
+                </TabItem>
+                <TabItem Header="Graph">
+                    <Grid Background="#FFE5E5E5"/>
+                </TabItem>
+            </TabControl>
         </Grid>
     </Grid>
 </Window>
