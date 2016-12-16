@@ -58,6 +58,7 @@
       <Paket>True</Paket>
       <Link>paket-files/neo4j.zip</Link>
     </Content>
+    <Compile Include="Functions\Neo4j.fs" />
     <Compile Include="Model\MemoryDump.fs" />
     <Compile Include="ViewModels\MainViewModel.fs" />
     <Resource Include="MainWindow.xaml" />
