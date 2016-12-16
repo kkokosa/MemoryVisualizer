@@ -6,3 +6,7 @@ NUGET
     FsXaml.Wpf (0.9.9)
       Expression.Blend.Sdk (>= 1.0.2)
     Microsoft.Diagnostics.Runtime (0.8.31-beta)
+HTTP
+  remote: http://neo4j.com
+  specs:
+    neo4j.zip (/artifact.php?name=neo4j-community-3.0.1-windows.zip)

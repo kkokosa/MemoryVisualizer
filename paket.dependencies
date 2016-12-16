@@ -5,3 +5,5 @@ framework >= net45
 
 nuget FsXaml.Wpf 0.9.9
 nuget Microsoft.Diagnostics.Runtime 0.8.31-beta
+
+http "http://neo4j.com/artifact.php?name=neo4j-community-3.0.1-windows.zip" neo4j.zip

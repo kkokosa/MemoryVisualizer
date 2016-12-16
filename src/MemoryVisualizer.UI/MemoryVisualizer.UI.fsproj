@@ -54,6 +54,10 @@
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
+    <Content Include="..\..\paket-files\neo4j.com\neo4j.zip">
+      <Paket>True</Paket>
+      <Link>paket-files/neo4j.zip</Link>
+    </Content>
     <Compile Include="Model\MemoryDump.fs" />
     <Compile Include="ViewModels\MainViewModel.fs" />
     <Resource Include="MainWindow.xaml" />
