@@ -17,7 +17,10 @@ module CommandLine =
                 $"       {executable} --protocol --backend=fake"
             ""
             "MemoryVisualizer foundation scaffold."
-            "Dump analysis, real queries, and rendering are not implemented."
+            if executable = "MemoryVisualizer.Cli" then
+                "Real queries and rendering are not implemented. Use inspect for dump summaries."
+            else
+                "Dump analysis, real queries, and rendering are not implemented in this host."
             if worker then
                 "The opt-in worker protocol uses synthetic fixtures only."
             ""

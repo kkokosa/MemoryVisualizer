@@ -1,9 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <InternalsVisibleTo Include="MemoryVisualizer.Analysis.Tests" />
     <ProjectReference Include="../MemoryVisualizer.Core/MemoryVisualizer.Core.fsproj" />
     <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="4.1.745802" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Compatibility.fs" />
+    <Compile Include="DacResolver.fs" />
+    <Compile Include="RuntimeVersion.fs" />
+    <Compile Include="Extraction.fs" />
     <Compile Include="ClrMdSnapshotReader.fs" />
   </ItemGroup>
 </Project>

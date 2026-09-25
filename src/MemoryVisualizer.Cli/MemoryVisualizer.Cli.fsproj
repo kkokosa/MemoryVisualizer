@@ -7,6 +7,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../Shared/CommandLine.fs" Link="CommandLine.fs" />
+    <Compile Include="Inspect.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 </Project>

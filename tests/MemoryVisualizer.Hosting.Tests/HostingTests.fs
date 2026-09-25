@@ -58,15 +58,15 @@ let ``Help cannot mask unsupported trailing arguments`` () =
     Assert.Contains("Unsupported arguments", stderr.ToString())
 
 [<Fact>]
-let ``Adapter loads managed dependency but never pretends to analyze a dump`` () =
+let ``Adapter reports missing dumps without fabricating metadata`` () =
     task {
         Assert.False(String.IsNullOrWhiteSpace ClrMdSnapshotReader.DependencyVersion)
         let reader = ClrMdSnapshotReader() :> ISnapshotReader
         let! result = reader.ReadMetadataAsync("does-not-exist.dmp", CancellationToken.None)
 
         match result with
-        | Error(AnalysisError.NotImplemented message) -> Assert.Contains("No dump was opened", message)
-        | Ok _ -> failwith "The foundation must not report a fabricated snapshot."
+        | Error(AnalysisError.FileNotFound message) -> Assert.Contains("does not exist", message)
+        | result -> failwithf "Expected actionable missing-file error, got %A" result
     }
 
 [<Fact>]
