@@ -4,5 +4,5 @@ obj/
 node_modules/
 package-lock.json
 **/packages.lock.json
-doc/
+doc/*.png
 data/

@@ -6,9 +6,10 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "noEmit": true,
+    "outDir": "dist",
+    "rootDir": ".",
     "skipLibCheck": false,
-    "types": []
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.cts", "tests/**/*.ts"]
 }

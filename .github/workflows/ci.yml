@@ -1,4 +1,4 @@
-name: Foundation
+name: Foundation and protocol
 
 on:
   push:
@@ -52,11 +52,34 @@ jobs:
         run: dotnet test MemoryVisualizer.slnx -c Release --no-build --no-restore
       - name: Executable smoke tests
         run: npm run smoke
+      - name: Shared contracts and native worker lifecycle
+        run: npm run test:protocol
       - name: Build worker for host RID
         run: dotnet build src/MemoryVisualizer.Worker -c Release --no-restore -r ${{ matrix.rid }} --self-contained false
       - name: Build CLI for host RID
         run: dotnet build src/MemoryVisualizer.Cli -c Release --no-restore -r ${{ matrix.rid }} --self-contained false
       - name: RID executable smoke tests
         run: npm run smoke
+        env:
+          RUNTIME_IDENTIFIER: ${{ matrix.rid }}
+      - name: RID worker lifecycle
+        run: npm run test:protocol
+        env:
+          RUNTIME_IDENTIFIER: ${{ matrix.rid }}
+      - name: Explicit pinned Electron runtime installation
+        run: npm run electron:install
+      - name: Linux Electron sandbox helper
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Real sandboxed Electron lifecycle (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:electron
+        env:
+          RUNTIME_IDENTIFIER: ${{ matrix.rid }}
+      - name: Real sandboxed Electron lifecycle
+        if: runner.os != 'Linux'
+        run: npm run test:electron
         env:
           RUNTIME_IDENTIFIER: ${{ matrix.rid }}

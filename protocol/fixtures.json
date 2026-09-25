@@ -1,0 +1,1304 @@
+{
+  "textBoundaryCases": [
+    { "textUnit": "\ud83d\ude00", "repeat": 4096, "valid": true },
+    { "textUnit": "\ud83d\ude00", "repeat": 4097, "valid": false }
+  ],
+  "validJson": [
+    "{}",
+    " \t{\"tag\":\"hello\",\"versions\":[1],\"extensions\":[]} \t",
+    "{\"tag\":\"hello\",\"versions\":[9007199254740991],\"extensions\":[]}",
+    "{\"values\":[0,1,9007199254740991,true,false,null]}",
+    "{\"text\":\"\\ud83d\\ude00\"}",
+    "{\"left\":{\"key\":1},\"right\":{\"key\":2}}",
+    "{\"escaped\":\"quote: \\\" slash: \\\\ newline: \\n carriage: \\r\"}"
+  ],
+  "invalidJson": [
+    "{\"tag\":\"hello\",\"versions\":[1.0],\"extensions\":[]}",
+    "{\"tag\":\"hello\",\"versions\":[1e0],\"extensions\":[]}",
+    "{\"tag\":\"hello\",\"versions\":[-0],\"extensions\":[]}",
+    "{\"tag\":\"hello\",\"versions\":[1],\"extensions\":[],\"\\u0074ag\":\"hello\"}",
+    "{\"tag\":\"hello\",\"versions\":[1],\"extensions\":[\"test.\\ud800\"]}",
+    "{\"n\":-1}",
+    "{\"n\":+1}",
+    "{\"n\":01}",
+    "{\"n\":1.0000000000000001}",
+    "{\"n\":1E+0}",
+    "{\"n\":1e999}",
+    "{\"n\":9007199254740992}",
+    "{\"n\":18446744073709551615}",
+    "{\"n\":NaN}",
+    "{\"n\":Infinity}",
+    "{\"nested\":{\"key\":1,\"key\":2}}",
+    "{\"nested\":[{\"key\":1,\"\\u006bey\":2}]}",
+    "{\"text\":\"\\udc00\"}",
+    "{\"text\":\"\\ud800a\"}",
+    "{\"text\":\"\\udc00\\ud800\"}",
+    "{\"\\ud800\":1}",
+    "{\"text\":\"\\q\"}",
+    "{\"text\":\"\\uZZZZ\"}",
+    "{\"text\":\"unterminated}",
+    "{\"n\":1,}",
+    "{\"items\":[1,]}",
+    "{}{}",
+    "{} null",
+    "",
+    " \t",
+    "null",
+    "[]",
+    "1",
+    "\"text\"",
+    "\ufeff{}",
+    "{}\r",
+    "{}\n"
+  ],
+  "validInbound": [
+    { "tag": "hello", "versions": [1], "extensions": [] },
+    {
+      "tag": "hello",
+      "versions": [1, 2, 3, 4, 5, 6, 7, 9007199254740991],
+      "extensions": ["example.feature"]
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "2",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "fixture:tiny", "delayMs": 0 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "3",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "fixture:tiny", "delayMs": 5000 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "4",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "snapshot.dispose",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "5",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 1, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "6",
+      "snapshotId": "abcdef01-2345-6789-abcd-ef0123456789",
+      "operation": "query",
+      "args": { "text": "objects 🧠", "pageSize": 128, "cursor": "18446744073709551615" }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "7",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "details",
+      "args": { "objectId": "18446744073709551615", "pageSize": 128, "cursor": "0" }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "8",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "scene",
+      "args": { "maxItems": 128 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "9",
+      "snapshotId": null,
+      "operation": "recipe.validate",
+      "args": { "recipe": { "schemaVersion": 1, "query": "objects" } }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "10",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "export",
+      "args": { "format": "svg", "maxBytes": 1 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "18446744073709551615",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "export",
+      "args": { "format": "svg", "maxBytes": 32768 }
+    },
+    { "tag": "cancel", "version": 1, "requestId": "18446744073709551615" },
+    { "tag": "shutdown", "version": 1 }
+  ],
+  "invalidInbound": [
+    { "tag": "hello", "versions": [1], "extensions": ["test.name\n"] },
+    { "tag": "cancel", "version": 1, "requestId": "1\n" },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 1, "cursor": "0\n" }
+    },
+    {},
+    { "tag": "unknown" },
+    { "tag": "hello", "versions": [], "extensions": [] },
+    { "tag": "hello", "versions": [1], "extensions": ["test.name\n"] },
+    { "tag": "hello", "versions": [0], "extensions": [] },
+    { "tag": "hello", "versions": [-1], "extensions": [] },
+    { "tag": "hello", "versions": [1.5], "extensions": [] },
+    { "tag": "hello", "versions": [9007199254740992], "extensions": [] },
+    { "tag": "hello", "versions": [1, 1], "extensions": [] },
+    { "tag": "hello", "versions": [1, 2, 3, 4, 5, 6, 7, 8, 9], "extensions": [] },
+    { "tag": "hello", "versions": ["1"], "extensions": [] },
+    { "tag": "hello", "versions": null, "extensions": [] },
+    { "tag": "hello", "versions": [1], "extensions": null },
+    { "tag": "hello", "versions": [1], "extensions": ["example.feature", "example.feature"] },
+    { "tag": "hello", "versions": [1], "extensions": ["Example.feature"] },
+    { "tag": "hello", "versions": [1], "extensions": ["example..feature"] },
+    { "tag": "hello", "versions": [1], "extensions": [".feature"] },
+    { "tag": "hello", "versions": [1], "extensions": [""] },
+    {
+      "tag": "hello",
+      "versions": [1],
+      "extensions": ["a.a", "a.b", "a.c", "a.d", "a.e", "a.f", "a.g", "a.h", "a.i"]
+    },
+    { "tag": "hello", "versions": [1], "extensions": [], "version": 1 },
+    { "tag": "hello", "versions": [1] },
+    {
+      "tag": "request",
+      "version": 2,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "0",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "01",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "+1",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1.0",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "18446744073709551616",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": 9007199254740992,
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {}
+    },
+    { "tag": "request", "version": 1, "requestId": "1", "operation": "capabilities", "args": {} },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": null
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": { "extra": true }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "capabilities",
+      "args": {},
+      "extra": true
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "capabilities",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "unknown",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "private.dmp", "delayMs": 0 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "fixture:tiny", "delayMs": -1 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "fixture:tiny", "delayMs": 5001 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "fixture:tiny", "delayMs": 0.5 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "snapshot.load",
+      "args": { "source": "fixture:tiny" }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "snapshot.dispose",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000000",
+      "operation": "snapshot.dispose",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "ABCDEF01-2345-6789-abcd-ef0123456789",
+      "operation": "snapshot.dispose",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000000000000000000000000001",
+      "operation": "snapshot.dispose",
+      "args": {}
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "", "pageSize": 1, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": null, "pageSize": 1, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 0, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 129, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 1, "cursor": "00" }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 1, "cursor": 1 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 1, "cursor": "18446744073709551616" }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "query",
+      "args": { "text": "objects", "pageSize": 1 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "details",
+      "args": { "objectId": "0", "pageSize": 1, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "details",
+      "args": { "objectId": "01", "pageSize": 1, "cursor": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "scene",
+      "args": { "maxItems": 0 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "scene",
+      "args": { "maxItems": 129 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "recipe.validate",
+      "args": { "recipe": { "schemaVersion": 2, "query": "objects" } }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "recipe.validate",
+      "args": { "recipe": { "schemaVersion": 1, "query": "objects", "extra": true } }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "operation": "recipe.validate",
+      "args": { "recipe": null }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "export",
+      "args": { "format": "png", "maxBytes": 1 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "export",
+      "args": { "format": "svg", "maxBytes": 0 }
+    },
+    {
+      "tag": "request",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "operation": "export",
+      "args": { "format": "svg", "maxBytes": 32769 }
+    },
+    { "tag": "cancel", "version": 1, "requestId": "0" },
+    { "tag": "cancel", "version": 1, "requestId": null },
+    { "tag": "cancel", "version": 1, "requestId": "1", "snapshotId": null },
+    { "tag": "shutdown", "version": 2 },
+    { "tag": "shutdown", "version": 1, "extra": null },
+    { "tag": "bye", "version": 1 }
+  ],
+  "validOutbound": [
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "result": {
+        "tag": "capabilities",
+        "value": {
+          "backend": "fake",
+          "operations": [
+            "capabilities",
+            "snapshot.load",
+            "snapshot.dispose",
+            "query",
+            "scene",
+            "details",
+            "recipe.validate",
+            "export"
+          ],
+          "extensions": [],
+          "limits": {
+            "maxFrameBytes": 65536,
+            "maxOutstanding": 8,
+            "maxPageSize": 128,
+            "maxSceneItems": 128,
+            "progressIntervalMs": 100
+          }
+        }
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "2",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "snapshot", "objectCount": "3" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "3",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "disposed" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "4",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "page", "items": [], "nextCursor": null, "truncated": false }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "18446744073709551615",
+      "snapshotId": "abcdef01-2345-6789-abcd-ef0123456789",
+      "result": {
+        "tag": "page",
+        "items": [
+          {
+            "objectId": "18446744073709551615",
+            "address": "0xffffffffffffffff",
+            "size": "18446744073709551615"
+          },
+          { "objectId": "1", "address": "0x0000000000000000", "size": "0" }
+        ],
+        "nextCursor": "18446744073709551615",
+        "truncated": true
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "6",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "scene",
+        "schemaVersion": 1,
+        "items": [{ "objectId": "1", "address": "0x0000000000000010", "size": "32" }],
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "7",
+      "snapshotId": null,
+      "result": { "tag": "recipe", "schemaVersion": 1, "valid": true }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "8",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "export", "format": "svg", "artifactId": "fixture:svg", "byteLength": "0" }
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "working",
+      "completed": 0,
+      "total": 100
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "18446744073709551615",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "phase": "working",
+      "completed": 100,
+      "total": 100
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "error": { "code": "Busy", "message": "Request limit reached.", "retryable": true }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "2",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "error": { "code": "Cancelled", "message": "Request cancelled.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "3",
+      "snapshotId": null,
+      "error": { "code": "SnapshotNotFound", "message": "Snapshot not found.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "4",
+      "snapshotId": null,
+      "error": { "code": "InvalidRequest", "message": "Invalid request.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "5",
+      "snapshotId": null,
+      "error": { "code": "NotImplemented", "message": "Not implemented.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "6",
+      "snapshotId": null,
+      "error": { "code": "InternalError", "message": "Internal error.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "7",
+      "snapshotId": null,
+      "error": { "code": "StaleSnapshot", "message": "Stale snapshot.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "8",
+      "snapshotId": null,
+      "error": { "code": "WorkerExited", "message": "Worker exited.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "9",
+      "snapshotId": null,
+      "error": { "code": "Timeout", "message": "Request timed out.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "10",
+      "snapshotId": null,
+      "error": { "code": "ProtocolError", "message": "Protocol error.", "retryable": false }
+    },
+    { "tag": "fatal", "code": "UnsupportedVersion", "message": "No supported protocol version." },
+    { "tag": "fatal", "code": "UnsupportedExtension", "message": "Unsupported extension." },
+    { "tag": "fatal", "code": "InvalidFrame", "message": "Invalid protocol frame." },
+    { "tag": "fatal", "code": "ProtocolViolation", "message": "Invalid protocol message." },
+    { "tag": "fatal", "code": "TransportTimeout", "message": "Transport timed out." },
+    { "tag": "fatal", "code": "InternalError", "message": "Internal error." },
+    { "tag": "bye", "version": 1 }
+  ],
+  "invalidOutbound": [
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "snapshot", "objectCount": "3\n" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [{ "objectId": "1", "address": "0x0000000000000000", "size": "0\n" }],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {},
+    { "tag": "unknown" },
+    { "tag": "bye", "version": 2 },
+    { "tag": "bye", "version": 1, "extra": true },
+    { "tag": "ready", "version": 1, "capabilities": null },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "native",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "snapshot.load",
+          "capabilities",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": ["example.feature"],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65537,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 9,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100,
+          "extra": 1
+        }
+      }
+    },
+    {
+      "tag": "ready",
+      "version": 1,
+      "capabilities": {
+        "backend": "fake",
+        "operations": [
+          "capabilities",
+          "snapshot.load",
+          "snapshot.dispose",
+          "query",
+          "scene",
+          "details",
+          "recipe.validate",
+          "export"
+        ],
+        "extensions": [],
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxOutstanding": 8,
+          "maxPageSize": 128,
+          "maxSceneItems": 128,
+          "progressIntervalMs": 100
+        },
+        "extra": true
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "0",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "disposed" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "01",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "disposed" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "18446744073709551616",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "disposed" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "result": { "tag": "snapshot", "objectCount": "3" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000000",
+      "result": { "tag": "snapshot", "objectCount": "3" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "ABCDEF01-2345-6789-abcd-ef0123456789",
+      "result": { "tag": "snapshot", "objectCount": "3" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "snapshot", "objectCount": "03" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "snapshot", "objectCount": 9007199254740992 }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "snapshot", "objectCount": "18446744073709551616" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "disposed", "extra": true }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "page", "items": null, "nextCursor": null, "truncated": false }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "page", "items": [], "nextCursor": "00", "truncated": false }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "page", "items": [], "nextCursor": null, "truncated": 0 }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "page", "items": [], "truncated": false }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [{ "objectId": "0", "address": "0x0000000000000000", "size": "0" }],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [{ "objectId": "1", "address": "0x000000000000000A", "size": "0" }],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [{ "objectId": "1", "address": "0X000000000000000a", "size": "0" }],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [{ "objectId": "1", "address": "0xa", "size": "0" }],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [{ "objectId": "1", "address": "0x000000000000000a", "size": "-1" }],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "page",
+        "items": [
+          { "objectId": "1", "address": "0x000000000000000a", "size": "1", "label": "forbidden" }
+        ],
+        "nextCursor": null,
+        "truncated": false
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "scene", "schemaVersion": 2, "items": [], "truncated": false }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "scene", "schemaVersion": 1, "items": [], "truncated": null }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "result": { "tag": "recipe", "schemaVersion": 1, "valid": false }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "recipe", "schemaVersion": 1, "valid": true }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "result": { "tag": "recipe", "schemaVersion": 2, "valid": true }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "export", "format": "png", "artifactId": "fixture:svg", "byteLength": "0" }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "export",
+        "format": "svg",
+        "artifactId": "file:output.svg",
+        "byteLength": "0"
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": {
+        "tag": "export",
+        "format": "svg",
+        "artifactId": "fixture:svg",
+        "byteLength": "18446744073709551616"
+      }
+    },
+    {
+      "tag": "success",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": "00000000-0000-0000-0000-000000000001",
+      "result": { "tag": "unknown" }
+    },
+    { "tag": "success", "version": 1, "requestId": "1", "snapshotId": null, "result": null },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "done",
+      "completed": 1,
+      "total": 100
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "working",
+      "completed": -1,
+      "total": 100
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "working",
+      "completed": 101,
+      "total": 100
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "working",
+      "completed": 0.5,
+      "total": 100
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "working",
+      "completed": 1,
+      "total": 99
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "phase": "working",
+      "completed": 1,
+      "total": 100
+    },
+    {
+      "tag": "progress",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "phase": "working",
+      "completed": 1,
+      "total": 100,
+      "extra": true
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "error": { "code": "Unknown", "message": "Error.", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "error": { "code": "Busy", "message": "", "retryable": false }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "error": { "code": "Busy", "message": "Error.", "retryable": 1 }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "error": { "code": "Busy", "message": "Error." }
+    },
+    {
+      "tag": "error",
+      "version": 1,
+      "requestId": "1",
+      "snapshotId": null,
+      "error": { "code": "Busy", "message": "Error.", "retryable": false, "details": {} }
+    },
+    { "tag": "fatal", "code": "Unknown", "message": "Error." },
+    { "tag": "fatal", "code": "Busy", "message": "Error." },
+    { "tag": "fatal", "code": "InvalidFrame", "message": "" },
+    { "tag": "fatal", "code": "InvalidFrame", "message": null },
+    { "tag": "fatal", "code": "InvalidFrame", "message": "Error.", "version": 1 },
+    { "tag": "shutdown", "version": 1 }
+  ]
+}
