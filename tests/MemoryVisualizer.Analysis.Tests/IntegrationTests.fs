@@ -16,6 +16,17 @@ open MemoryVisualizer.Core.Analysis
 open Xunit
 
 type GeneratedDump() =
+    let dumpType =
+        match Environment.GetEnvironmentVariable("MEMORYVISUALIZER_FIXTURE_DUMP_TYPE") with
+        | null
+        | ""
+        | "WithHeap" -> DumpType.WithHeap
+        | "Full" -> DumpType.Full
+        | _ ->
+            invalidArg
+                "MEMORYVISUALIZER_FIXTURE_DUMP_TYPE"
+                "Use WithHeap (the CI default) or Full (explicit extended native-memory coverage)."
+
     let directory =
         Path.Combine(Path.GetTempPath(), "MemoryVisualizer-fixture-" + Guid.NewGuid().ToString("N"))
 
@@ -80,7 +91,7 @@ type GeneratedDump() =
 
             try
                 DiagnosticsClient(child.Id)
-                    .WriteDumpAsync(DumpType.Full, dumpPath, false, timeout.Token)
+                    .WriteDumpAsync(dumpType, dumpPath, false, timeout.Token)
                     .GetAwaiter()
                     .GetResult()
             with :? OperationCanceledException when timeout.IsCancellationRequested ->
@@ -97,7 +108,8 @@ type GeneratedDump() =
                         "running"
 
                 failwithf
-                    "Synthetic full-dump capture exceeded %.0f seconds; child %d is %s; dump bytes=%d. stdout tail: %s stderr tail: %s"
+                    "Synthetic %O dump capture exceeded %.0f seconds; child %d is %s; dump bytes=%d. stdout tail: %s stderr tail: %s"
+                    dumpType
                     captureLimit.TotalSeconds
                     child.Id
                     status

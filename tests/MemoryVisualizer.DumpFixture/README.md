@@ -17,7 +17,13 @@ version. `dacPath` identifies the DAC in
 `RuntimeEnvironment.GetRuntimeDirectory()`, not a path from dump metadata.
 The external collector should verify `processId` against the child it just
 spawned and use `Microsoft.Diagnostics.NETCore.Client` **0.2.661903** to collect
-a heap dump of **only that child**. Keep input open during collection. Send a
+a `DumpType.WithHeap` dump of **only that child**. This includes managed heap
+data, unlike mini/triage capture, without requiring unrelated native mappings.
+The integration harness defaults to this on every host; set
+`MEMORYVISUALIZER_FIXTURE_DUMP_TYPE=Full` for explicit extended coverage.
+Both modes must satisfy the same complete snapshot assertions.
+Keep input open during collection and continuously drain stdout after the
+readiness line, as well as stderr. Send a
 line, or close input, to release the fixture and exit with code zero. All
 explicit GCHandles are freed in a `finally` block. No dump is written by the
 fixture itself; integration tests own collection and cleanup.

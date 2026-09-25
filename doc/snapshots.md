@@ -60,17 +60,18 @@ matching for that layout; safe build-ID validation is follow-up work.
 
 Cross-platform hosts do not imply arbitrary dump portability. OS and worker
 architecture must match the target before DAC loading. Initial validation is
-for generated, full, framework-dependent .NET 11 RC1 dumps.
+for generated, heap-containing, framework-dependent .NET 11 RC1 dumps. `WithHeap`
+is the CI default; `Full` has also been exercised separately.
 
-| Host / worker                             | Target                             | Status                                                                                                |
-| ----------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Windows x64                               | Windows x64, .NET 11 RC1           | Generated full-dump integration verified locally                                                      |
-| Ubuntu 24.04 glibc x64                    | Linux x64, .NET 11 RC1             | Generated full-dump integration verified in WSL; target-version recovery required with this ClrMD pin |
-| macOS arm64                               | macOS arm64, .NET 11 RC1           | Automated generated-dump gate; not locally certified                                                  |
-| macOS x64                                 | macOS x64, .NET 11 RC1             | Automated generated-dump gate; not locally certified                                                  |
-| Windows x64                               | .NET Framework x64 / older CoreCLR | Matching DAC mechanism exists; not in the verified fixture matrix                                     |
-| Any cross-OS or cross-architecture pair   | Any                                | Rejected with a matching-worker recommendation                                                        |
-| x86, ARM32, Linux arm64/musl, single-file | Any                                | Not supported in the initial policy                                                                   |
+| Host / worker                             | Target                             | Status                                                                                           |
+| ----------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Windows x64                               | Windows x64, .NET 11 RC1           | Generated heap-containing dump integration verified locally; Full also exercised                 |
+| Ubuntu 24.04 glibc x64                    | Linux x64, .NET 11 RC1             | Generated dump integration verified in WSL; target-version recovery required with this ClrMD pin |
+| macOS arm64                               | macOS arm64, .NET 11 RC1           | Automated generated-dump gate; not locally certified                                             |
+| macOS x64                                 | macOS x64, .NET 11 RC1             | Automated generated-dump gate; not locally certified                                             |
+| Windows x64                               | .NET Framework x64 / older CoreCLR | Matching DAC mechanism exists; not in the verified fixture matrix                                |
+| Any cross-OS or cross-architecture pair   | Any                                | Rejected with a matching-worker recommendation                                                   |
+| x86, ARM32, Linux arm64/musl, single-file | Any                                | Not supported in the initial policy                                                              |
 
 This is not a minimum-OS/package certification table. Mac and hosted CI results
 must be observed before claiming those platforms certified. Missing runtime
@@ -172,9 +173,16 @@ dotnet test tests/MemoryVisualizer.Analysis.Tests -c Release --no-restore
 ```
 
 The tests spawn only `MemoryVisualizer.DumpFixture`, confirm the reported child
-PID, and capture that child's full dump via the pinned transitive diagnostics
-client. Both child output pipes are continuously drained after readiness, with
-only a 4,096-character tail retained per pipe. Full-dump capture has a finite
+PID, and capture that child's `DumpType.WithHeap` dump via the pinned transitive
+diagnostics client. This includes managed heap data and is not a mini/triage
+dump. CI avoids `Full` because unrelated native mappings can produce
+multi-gigabyte files: a hosted macOS x64 Full capture exceeded 3.7 GB and
+three minutes. The same complete map, reference, root, type, and offline-DAC
+assertions remain mandatory; reducing capture scope does not relax them.
+Set `MEMORYVISUALIZER_FIXTURE_DUMP_TYPE=Full` for explicit extended native-memory
+coverage, or `WithHeap` for the default. No automatic fallback or retry is used.
+Both child output pipes are continuously drained after readiness, with
+only a 4,096-character tail retained per pipe. Capture has a finite
 three-minute limit inside the ten-minute test-job gate; a timeout reports
 child status, generated file size, and bounded diagnostics without retries.
 The fixture uses synthetic cycles, shared references, arrays, LOH/POH,

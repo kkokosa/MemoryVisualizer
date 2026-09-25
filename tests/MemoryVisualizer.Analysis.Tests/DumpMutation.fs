@@ -42,7 +42,21 @@ let private mutate path address replacement =
             reader.ReadUInt32() |> ignore
             let rva = reader.ReadUInt32()
 
-            if kind = 9u then
+            if kind = 5u then
+                at (int64 rva)
+                let ranges = reader.ReadUInt32()
+
+                for item in 0u .. ranges - 1u do
+                    let entry = int64 rva + 4L + int64 item * 16L
+                    at entry
+                    let start = reader.ReadUInt64()
+                    let size = reader.ReadUInt32()
+                    let fileOffset = reader.ReadUInt32()
+
+                    visit start (uint64 size) (uint64 fileOffset) (fun () ->
+                        at entry
+                        writer.Write(0UL))
+            elif kind = 9u then
                 at (int64 rva)
                 let ranges = reader.ReadUInt64()
                 let mutable fileOffset = reader.ReadUInt64()
