@@ -2,6 +2,7 @@
   <ItemGroup>
     <Compile Include="Identifiers.fs" />
     <Compile Include="Snapshot.fs" />
+    <Compile Include="IndexedHeapSnapshot.fs" />
     <Compile Include="Contracts.fs" />
     <Compile Include="Analysis.fs" />
   </ItemGroup>

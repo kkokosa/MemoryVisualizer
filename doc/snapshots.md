@@ -95,6 +95,9 @@ enumerators, streams, or callbacks are retained. Native runtimes and the owned
 dump reader/stream are disposed before completion, including cancellation and
 failure. Callers may keep snapshots indefinitely, subject to ordinary managed
 memory use. Arrays are caller-owned; avoid mutation when sharing snapshots.
+The provisional [M1 indexed store](indexed-snapshots.md) takes owned copies of
+these containers, including nested segment arrays, and exposes bounded
+read-only selection without changing the reader's contract or completeness.
 
 Runtime identity includes a fresh snapshot UUID and runtime discovery index.
 Object identity adds a target `uint64` address; type identity adds a method
