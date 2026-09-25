@@ -14,7 +14,7 @@ module Inspect =
     let usage =
         "inspect <dump-path> [--dac <trusted-absolute-path>] [--cache <trusted-absolute-directory>] [--allow-network] [--memory-map-only]"
 
-    let private parse (arguments: string array) =
+    let internal parse (arguments: string array) =
         if arguments.Length = 0 || arguments[0].StartsWith("--", StringComparison.Ordinal) then
             Error usage
         else

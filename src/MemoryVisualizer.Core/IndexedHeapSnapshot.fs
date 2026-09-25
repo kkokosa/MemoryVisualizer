@@ -122,6 +122,7 @@ type private SnapshotIndexState = {
     ByType: ObjectOrder
     Types: Dictionary<TypeIdentity, HeapType>
     Segments: Dictionary<struct (RuntimeIdentity * uint64), SnapshotSegmentInfo>
+    OrderedSegments: SnapshotSegmentInfo array
 }
 
 module private SnapshotIndex =
@@ -307,6 +308,17 @@ module private SnapshotIndex =
             if heap.Index < 0 || not (heapIds.Add(struct (heap.Runtime, heap.Index))) then
                 invalid "Heap indices must be nonnegative and unique within a runtime."
 
+        let heapRows = Array.init heaps.Length id
+        let heapScratch = Array.zeroCreate heaps.Length
+
+        sort token heapRows heapScratch (fun left right ->
+            compare (heaps[left].Runtime.Index, heaps[left].Index) (heaps[right].Runtime.Index, heaps[right].Index))
+
+        let orderedHeaps =
+            Array.init heaps.Length (fun index ->
+                token.ThrowIfCancellationRequested()
+                heaps[heapRows[index]])
+
         let segments = Dictionary<struct (RuntimeIdentity * uint64), SnapshotSegmentInfo>()
 
         let segmentInfo =
@@ -337,6 +349,10 @@ module private SnapshotIndex =
 
                 for generation in info.Generations do
                     token.ThrowIfCancellationRequested()
+
+                    if generation.Generation < 0 then
+                        invalid "Generation range indices must be nonnegative."
+
                     checkRange generation.Range
 
                 for context in info.AllocationContexts do
@@ -421,12 +437,49 @@ module private SnapshotIndex =
             if objects[byAddress[index - 1]].Identity = objects[byAddress[index]].Identity then
                 invalid "Duplicate object address within a runtime."
 
+        let orderedSegments = Array.copy segmentInfo
+        let segmentRows = Array.init segmentInfo.Length id
+        let segmentScratch = Array.zeroCreate segmentInfo.Length
+
+        sort token segmentRows segmentScratch (fun left right ->
+            compare
+                (segmentInfo[left].Runtime.Index, segmentInfo[left].Address)
+                (segmentInfo[right].Runtime.Index, segmentInfo[right].Address))
+
+        for index in 0 .. segmentRows.Length - 1 do
+            token.ThrowIfCancellationRequested()
+            let segment = segmentInfo[segmentRows[index]]
+
+            let generations =
+                Array.init segment.Generations.Count (fun i ->
+                    token.ThrowIfCancellationRequested()
+                    segment.Generations[i])
+
+            let rows = Array.init generations.Length id
+            let scratch = Array.zeroCreate generations.Length
+
+            sort token rows scratch (fun left right ->
+                compare
+                    (generations[left].Generation, generations[left].Range.Start, generations[left].Range.End)
+                    (generations[right].Generation, generations[right].Range.Start, generations[right].Range.End))
+
+            let orderedGenerations =
+                Array.init rows.Length (fun i ->
+                    token.ThrowIfCancellationRequested()
+                    generations[rows[i]])
+                |> readonly
+
+            orderedSegments[index] <- {
+                segment with
+                    Generations = orderedGenerations
+            }
+
         let state = {
             Info = {
                 Metadata = snapshot.Metadata
                 Target = snapshot.Target
                 Runtimes = readonly runtimes
-                Heaps = readonly heaps
+                Heaps = readonly orderedHeaps
                 Segments = readonly segmentInfo
                 Types = readonly typeInfo
                 Edges = copy token snapshot.Edges |> readonly
@@ -442,6 +495,7 @@ module private SnapshotIndex =
             ByType = order byType (fun left right -> left.Type = right.Type)
             Types = types
             Segments = segments
+            OrderedSegments = orderedSegments
         }
 
         token.ThrowIfCancellationRequested()
@@ -627,6 +681,42 @@ type IndexedHeapSnapshot private (initial: SnapshotIndexState) =
         (selection: ObjectSelection, page: SnapshotPageRequest, cancellationToken: CancellationToken)
         =
         access cancellationToken (fun value -> SnapshotIndex.select value selection page cancellationToken)
+
+    /// Visits every candidate once in runtime/address order. False stops before the next row.
+    /// The callback owns filtering/work budgets; there is no hidden scan or materialization.
+    member _.VisitObjects
+        (visitor: HeapObject -> HeapType -> SnapshotSegmentInfo -> bool, cancellationToken: CancellationToken)
+        =
+        access cancellationToken (fun value ->
+            let mutable index = 0
+            let mutable running = true
+
+            while running && index < value.ByAddress.Rows.Length do
+                cancellationToken.ThrowIfCancellationRequested()
+                let item = value.Objects[value.ByAddress.Rows[index]]
+
+                running <-
+                    visitor
+                        item
+                        value.Types[item.Type]
+                        value.Segments[struct (item.Identity.Runtime, item.SegmentAddress)]
+
+                index <- index + 1
+
+            running)
+
+    /// Segments are ordered by runtime/address and their generation ranges by generation/start/end.
+    member _.VisitSegments(visitor: SnapshotSegmentInfo -> bool, cancellationToken: CancellationToken) =
+        access cancellationToken (fun value ->
+            let mutable index = 0
+            let mutable running = true
+
+            while running && index < value.OrderedSegments.Length do
+                cancellationToken.ThrowIfCancellationRequested()
+                running <- visitor value.OrderedSegments[index]
+                index <- index + 1
+
+            running)
 
     member _.Dispose() = lock gate (fun () -> state <- None)
 

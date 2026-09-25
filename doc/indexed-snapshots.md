@@ -14,6 +14,9 @@ the measured ADR, reverse reference indexes, and bounded graph/root-path
 workloads. MQL, scene generation, rendering, and protocol integration are not
 part of this store.
 
+The separate [MQL M1 library](mql.md) now consumes this store through bounded
+visitor primitives; storage still does not interpret query/presentation syntax.
+
 ## Public API
 
 All types below live in `MemoryVisualizer.Core`:
@@ -61,6 +64,23 @@ of runtimes, heaps, types, segments, edges, roots, handles, and diagnostics.
 `SnapshotSegmentInfo` has the same segment metadata as `HeapSegment`, but
 its generation and allocation-context collections are also read-only.
 Object rows are obtained through exact lookup or bounded selection.
+Heaps are ordered by runtime index, then heap index.
+
+`VisitObjects(visitor, token)` calls `HeapObject -> HeapType ->
+SnapshotSegmentInfo -> bool` once per captured candidate in runtime/address
+order, including free entries. `VisitSegments(visitor, token)` calls
+`SnapshotSegmentInfo -> bool` in runtime/segment-address order; each visited
+segment's generation ranges sort by generation/start/end. A visitor returns
+false to stop immediately (no lookahead); the operation returns `Ok false`
+if stopped or `Ok true` if every callback returned true. Even returning false
+on the last row reports a caller stop, not inferred exhaustion. No filtering,
+offset rescans or execution-time sorts hide behind these callbacks.
+
+Visitors run synchronously under the existing store lock with cancellation
+checks between calls. Callers must check their own deadline/work budget before
+processing each candidate, and bound work inside callbacks. The Query library
+does so. Callback exceptions propagate; these APIs are for trusted hosts, not
+query-supplied executable code. Dispose waits for visitation as for selection.
 
 ## Selection, ranges, and pages
 
@@ -97,7 +117,10 @@ without a range can still return an object starting there. Nothing clamps an
 object's size or a range endpoint.
 
 Segment object/committed/reserved/generation/allocation-context ranges must
-also be non-inverted; empty ranges remain valid. Geometric containment is not
+also be non-inverted; empty ranges remain valid.
+Generation indices in nested ranges must be nonnegative, just like captured
+object generations; invalid metadata fails indexing rather than wrapping
+into unsigned query values. Geometric containment is not
 revalidated: these independently captured ranges, especially reserved tails,
 are not required to nest, and an object's explicit segment link determines
 ownership. An index is not a new claim of physical heap consistency.
@@ -175,7 +198,21 @@ including array headers, the owned object-reference array, metadata wrappers,
 dictionaries, input snapshot, records, strings, or GC overhead. Temporary
 validation sets and sort storage are not retained by the published store.
 
+MQL visitation additionally retains an ordered segment-reference array, one
+ordered SnapshotSegmentInfo record per segment, and an ordered reference array
+plus read-only wrapper for each segment's generation ranges. Original GetInfo
+segment/generation collection ordering is preserved independently. On a 64-bit
+host the extra array payload is 8 bytes per segment plus 8 bytes per generation
+range, **excluding** the added records, array headers and wrappers. Build-time
+heap/segment/generation ordering uses two temporary int32 index arrays per sort;
+generation sorting is per segment. Heap ordering temporarily retains a second
+heap reference array but publishes only the sorted one. These costs are
+provisional and not a measured memory budget.
+
 Build cost is `O(N log N)` for sorting, plus linear copying/validation.
+The ordered visitors add `O(H log H + S log S + sum(Gs log Gs))` build work for
+heaps, segments and per-segment generation ranges, with cancellation in sorting
+and copying.
 Exact address lookup is binary search; type lookup uses a scoped dictionary.
 Address/type range candidates are located by binary search within their
 scope; prefix maxima handle overlapping intervals. Heap/kind/generation/free

@@ -2,7 +2,7 @@
 
 MemoryVisualizer is being rebuilt as a local-first, cross-platform tool for turning .NET memory into reproducible, publication-quality diagrams. The architecture is F#/.NET 11 analysis and scene computation, a headless CLI, and a TypeScript/Electron desktop shell. See the [roadmap (#5)](https://github.com/kkokosa/MemoryVisualizer/issues/5).
 
-**Implemented now:** the [#6](https://github.com/kkokosa/MemoryVisualizer/issues/6) foundation, [#7](https://github.com/kkokosa/MemoryVisualizer/issues/7) bounded worker protocol, [#8](https://github.com/kkokosa/MemoryVisualizer/issues/8) native dump snapshot adapter and CLI summary, and the **visual-first M1 slice of [#10](https://github.com/kkokosa/MemoryVisualizer/issues/10)**: a read-only indexed snapshot store for bounded address/type/range selection. Snapshots include memory maps, reference edges, roots, and handle metadata. The Electron shell and v1 worker protocol still use their explicit **fake backend**, not the new adapter/store. **Not implemented:** MQL, reference traversal/root-path algorithms, layout/rendering, exports, packaging, or the desktop workspace UX. Full #10 backend comparison, measured ADR and large benchmarks remain deferred; managed indexes are provisional. The old WPF/FsXaml application and Neo4j/Java/Paket startup dependencies have been removed rather than ported.
+**Implemented now:** the [#6](https://github.com/kkokosa/MemoryVisualizer/issues/6) foundation, [#7](https://github.com/kkokosa/MemoryVisualizer/issues/7) bounded worker protocol, [#8](https://github.com/kkokosa/MemoryVisualizer/issues/8) native dump snapshot adapter and CLI summary, the **visual-first M1 slice of [#10](https://github.com/kkokosa/MemoryVisualizer/issues/10)** (indexed snapshot store), and the **bounded M1 slice of [#11](https://github.com/kkokosa/MemoryVisualizer/issues/11)** (MQL parser, typed planner/executor and native query CLI). Snapshots include memory maps, reference edges, roots, and handle metadata. The Electron shell and v1 worker protocol still use their explicit **fake backend**, not the new adapter/store/query library. **Not implemented:** MQL reference traversal/root-path algorithms, layout/rendering, SVG/other exports, packaging, or the desktop workspace UX. Full #10 backend comparison, measured ADR and large benchmarks remain deferred; managed indexes are provisional. Full #11 also requires M2 and real worker integration. The old WPF/FsXaml application and Neo4j/Java/Paket startup dependencies have been removed rather than ported.
 
 ## Quick start
 
@@ -54,6 +54,8 @@ dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore
 On Linux/macOS substitute the matching `libmscordaccore.so`/`libmscordaccore.dylib` absolute path. Omit `--memory-map-only` to include reference/root/handle counts. Output is bounded JSON without object/string payloads; all counts use decimal strings. Exit codes: `0` complete, `3` usable partial (read diagnostics), `2` failure/invalid arguments, `130` cancellation. The public F# `IHeapSnapshotReader` provides the full materialized data. See [snapshot extraction and compatibility](doc/snapshots.md) for DAC trust, limits, completeness, and support restrictions.
 
 `IndexedHeapSnapshot.Create` consumes that materialized snapshot without native handles. It provides exact scoped object/type lookup and deterministic bounded selection by runtime, heap, segment, generation, heap kind, type, free/allocated entries, and half-open address ranges. See the [provisional indexed-store contract](doc/indexed-snapshots.md) for ownership, interval overlap versus starts-in-range, pagination, partial input, limits, cancellation, and disposal. This API is not yet wired to a scene or desktop import.
+
+For native MQL, use `query` instead of `inspect` and pass `--query "MATCH (o:Object) RETURN o.Address,o.Size"` along with the dump path and trusted DAC options. This returns versioned JSON rows and drawing instructions, **not SVG**. `--max-results`, `--max-directives`, `--max-candidates` and `--max-elapsed-ms` may lower the defaults. Exit codes are `0` complete, `3` source-partial or query-truncated, `2` failure, `130` cancellation. The [MQL specification](doc/mql.md) defines syntax, typed properties, explicit runtime/heap DRAW lanes, source spans, shared budgets, the public F# API and CLI JSON contract.
 
 `npm run smoke` executes both DLL and native apphost forms of both programs, checking actual exit codes, stdout/stderr, help/version aliases, invalid arguments, and output paths. It defaults to `Release`; set `CONFIGURATION=Debug` to check a Debug build. Set `RUNTIME_IDENTIFIER` to the host RID after a RID-specific build. These are environment variables (use `$env:NAME = "value"` in PowerShell).
 
@@ -112,11 +114,12 @@ For an intentional dependency update, edit exact manifest versions, run `dotnet 
 | Project                                 | Responsibility                                                                                                                                                                                                                     |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/MemoryVisualizer.Core`             | Platform-neutral snapshot/runtime-scoped identities, materialized records, provisional read-only M1 indexes, DTO conversion, and analysis interfaces. No ClrMD, native, UI, JSON framework, or Electron dependency.                |
+| `src/MemoryVisualizer.Query`            | Bounded M1 MQL lexer/parser, typed selection/projection and separate presentation plans, snapshot-scoped executor. Core-only dependency; suitable for CLI and future real worker binding.                                          |
 | `src/MemoryVisualizer.Analysis.ClrMd`   | The only ClrMD reference. Explicit dump extraction, trusted DAC resolution, compatibility checks, bounded materialization, progress/cancellation, and typed errors/partial diagnostics. Only core types cross its public boundary. |
 | `src/MemoryVisualizer.Worker`           | Bounded v1 protocol host and deterministic fake backend; real analysis/query operations remain deferred.                                                                                                                           |
-| `src/MemoryVisualizer.Cli`              | Offline native `inspect` summary plus help/version; future query/export host, not an IPC client.                                                                                                                                   |
+| `src/MemoryVisualizer.Cli`              | Offline native `inspect` summary and `query` rows/drawing instructions plus help/version. Not an IPC client or SVG exporter.                                                                                                       |
 | `src/Shared/CommandLine.fs`             | Shared hosting-only source linked into the executables and hosting tests; CLI concerns do not enter the core.                                                                                                                      |
-| `tests/MemoryVisualizer.Core.Tests`     | Contract, identity, lossless serialization and indexed selection/range/paging/ownership/lifetime tests, with no adapter reference or native loading.                                                                               |
+| `tests/MemoryVisualizer.Core.Tests`     | Contract, identity, lossless serialization, indexed-store and shared-fixture MQL grammar/type/span/budget/composition tests, with no adapter reference or native loading.                                                          |
 | `tests/MemoryVisualizer.Hosting.Tests`  | Argument handling, managed adapter loading/failures, and worker protocol coverage.                                                                                                                                                 |
 | `tests/MemoryVisualizer.Analysis.Tests` | Real generated-dump integration, offline DACs, memory maps, aliases/cycles/arrays/handles, bounded details, corruption, cancellation/disposal, and lossless summaries.                                                             |
 | `tests/MemoryVisualizer.DumpFixture`    | Controlled synthetic fixture child process; no production attach or historical dump access.                                                                                                                                        |
@@ -150,167 +153,52 @@ The GitHub Actions matrix covers Windows x64 (`windows-2025`), Linux x64 (`ubunt
 
 Integration tests spawn only their own synthetic fixture child and collect a heap-containing `WithHeap` dump, then use its trusted installed runtime DAC with network disabled. This is not a mini/triage dump; `Full` capture is opt-in for extended coverage because unrelated native maps can produce multi-gigabyte files on hosted macOS. All completeness assertions remain unchanged. Temporary dumps are deleted, never committed or uploaded as CI artifacts. Historical dumps remain untouched. Packaging/minimum OS certification belongs to #15; historical issues are not automatically closed. No dump contents or telemetry are uploaded by the adapter. Optional Windows symbol-service lookup is documented and off by default.
 
-## Product examples (not implemented)
+## Executable M1 examples
 
-All diagrams and MQL snippets below are historical product/design examples, **not screenshots or functionality of this scaffold**. They preserve the intended address-aligned composition and publication-quality output. MQL will be a documented subset inspired by Cypher, not full Cypher compatibility or a Neo4j dependency. Live process attachment is deferred.
+MQL retains familiar MATCH/WHERE/RETURN vocabulary, not Cypher compatibility.
+The following composition is executable and tested against the deterministic
+test fixture; on a real dump, use its captured addresses and runtime/heap lanes:
 
-![Example results](/doc/visualizer_figures.png)
-
-Often there is a need to understand what is inside .NET memory process - probably because of some kind of memory leak. Nevertheless, .NET memory management is also very interesting piece of software. No matter what is the reason you need to look inside, there is a huge amount of data to be analyzed. And as we all know that a picture is worth a thousand words, this tool is dedicated specifically to visualize .NET memory - both from memory dumps and from attached processes.
-
-The intended emphasis is on **drawing images for articles, presentations and workshops**, rather than replacing general-purpose memory profilers. Queries and drawing instructions will describe what to show, rather than being limited to hard-coded views.
-
-The goal of this tool is to produce figures like in the opening (exemplary) picture. The program itself will be very simple, with the main window containing query window and the results:
-
-![Main window](/doc/visualizer_window.png)
-
-Queries in MemoryVisualizer are written in the custom language MQL (Memory Query Language) which is based on [Cypher](https://neo4j.com/developer/cypher-query-language/) (neo4j query language) with extensions allowing for formatting and drawing information. Let's look at some examples. Note: those examples impose certain simplifications, not to get lost in the complexity of the memory management problem itself. For example, I assume Workstation GC mode to have only one managed heap.
-
-We can ask for memory segments only:
-
-```
-MATCH (seg: Segment)
-RETURN seg
+```text
+MATCH (seg: Segment) RETURN seg;
+MATCH (gen: Generation) RETURN gen.Generation AS BOX (Label = gen.Generation, LabelPosition = InnerCenter, Background = Grey);
+MATCH (obj: Object) WHERE obj.Generation = 2 AND obj.Type = "Same.Display.Name" RETURN obj.Address, obj.Size AS PIN;
+DRAW Memory(0x100, 0x200, Runtime = 0, Heap = 0, Width = 16)
 ```
 
-![MQL1](/doc/mql1.png)
+The rows and instructions preserve one target-address coordinate system without
+merging equal addresses from different runtimes or heaps. Selection/projection
+are separate from presentation. Free entries can be drawn explicitly:
 
-The above-mentioned extensions to Cypher allows to specify how results should be drawn, for example:
-
-```
-MATCH (seg: Segment)
-RETURN seg AS BOX (Label = seg.Address,
-                   LabelPosition = OuterLeft)
-```
-
-![MQL1](/doc/mql2.png)
-
-We can draw only generations:
-
-```
-MATCH (gen Generation)
-RETURN gen AS BOX (Label = gen.Name,
-                  LabelPosition = InnerCenter,
-                  White = Grey)
+```text
+MATCH (obj: Object) WHERE obj.IsFree = true RETURN obj AS BOX (Background = Yellow);
+DRAW Memory(0x100, 0x400, Runtime = 0, Heap = 0)
 ```
 
-![MQL1](/doc/mql3.png)
+The [full bounded grammar and tested examples](doc/mql.md) replace the old
+non-executable sketches. Intentional corrections: `(gen Generation)` needed
+`(gen: Generation)`; `gen.Name` is replaced by captured `gen.Generation`;
+`White = Grey` becomes `Background = Grey`; `seg.Generation` cannot refer to
+another statement's binding; arbitrary `hash(...)`/string expressions are not
+allowed; statements need semicolons; `Width = 1M` is not an integer width.
+Use `IsFree = true`, not the display-name assumption `Type = "Free"`.
+Relationship patterns, unrestricted root paths, DOT/CIRCLE and executable
+templates remain unsupported. These were design ideas, not legacy grammar.
 
-But as one command will contain two queries returning both segments and generations, the engine drawing must be wise and put one on the second line of addresses. This is the very important principle of drawing query results - if the command contains several queries, the results of these queries are drawn in the "overlapping" mode in terms of address space:
+## Historical visual concepts (not rendered by M1)
 
-```
-MATCH (seg: Segment)
-RETURN seg
+The intended emphasis remains **drawing images for articles, presentations and
+workshops**, rather than replacing general-purpose profilers. These historical
+images illustrate future output and UX, not screenshots of current features.
+Live process attachment, reference traversal, shared scenes/SVG (#12), and the
+real desktop import/editor/recipes workflow (#13) remain separate work.
 
-MATCH (gen Generation)
-RETURN gen AS BOX (Label = gen.Name,
-                   LabelPosition = InnerCenter,
-                   Background = hash (seg.Generation))
-```
+![Historical composition concept](/doc/visualizer_figures.png)
 
-![MQL1](/doc/mql4.png)
+![Historical editor concept](/doc/visualizer_window.png)
 
-Going forward, as Cypher (so MQL) is excellent in querying graphs, it allows perfectly to query for object references:
+![Historical address-aligned layers concept](/doc/mql4.png)
 
-```
-MATCH (parent: Object) - [ref] -> (obj: Object)
-WHERE obj.Address = 0xDDE51018
-RETURN parent, ref, obj
-```
+![Historical fragmentation concept](/doc/mql12.png)
 
-![MQL1](/doc/mql5.png)
-
-And with the AS operator we can impose on a further way of drawing:
-
-```
-MATCH (parent: Object) - [ref] -> (obj: Object)
-WHERE obj.Address = 0xDDE51018
-RETURN parent AS CIRCLE (Radius = parent.Size)
-       ref
-       obj AS CIRCLE (Label = obj.Address + "\r\n" + obj.Type,
-                      Radius = obj.Size)
-```
-
-![MQL1](/doc/mql6.png)
-
-We want to see what roots keeps a reference to the object? Nothing easier thanks to Cypher capabilities (`relationships`):
-
-```
-MATCH p = (root: Object) - [*] -> (obj: Object)
-WHERE obj.Address = 0xDDE51018
-RETURN root AS DOT (Label = root.Type)
-       relationships (p)
-       obj AS DOT (Label = obj.Size)
-```
-
-In addition, there is a structure of relationships between the various entities representing memory. Eg. the _Segment_ will have a relationship to its _Generations_. Those relations together with overlapping semantics can be easily consumed by MQL. To draw all segments containing generation 2:
-
-```
-MATCH (seg: Segment) -> (gen Generation)
-WHERE gen.Generation = 2
-RETURN seg, gen AS BOX (Label = gen.Name,
-                        LabelPosition = InnerCenter,
-                        Background = Yellow)
-```
-
-![MQL1](/doc/mql7.png)
-
-We can then for example draw additionaly objects of given type:
-
-```
-MATCH (seg: Segment) -> (gen Generation) -> (obj: Object)
-WHERE gen.Generation = 2 AND obj.Type = "SomeClass"
-RETURN seg
-       gen AS BOX (Label = gen.Name, LabelPosition = InnerCenter)
-       obj AS PIN
-```
-
-![MQL1](/doc/mql8.png)
-
-We can also combine this altogether:
-
-```
-MATCH (seg: Segment) RETURN seg
-
-MATCH (gen: Generation)
-RETURN gen AS BOX (Label = gen.Name, LabelPosition = InnerCenter)
-
-MATCH (obj: Object) - [ref] -> (child: Object)
-WHERE child.Address = 0xDDE51018
-RETURN obj, ref, child
-```
-
-![MQL1](/doc/mql9.png)
-
-For illustrational purposes there is also an addional command `DRAW`. It can take a variety of input functions but at the beginning it be only a `Memory` function, which draws symbolically a given block of memory:
-
-```
-DRAW Memory (0xDDE51000, 0xDFE51000, Width = 1M)
-```
-
-![MQL1](/doc/mql10.png)
-
-Then you could use it with the rest of other queries thanks to the "overlapping semantics":
-
-```
-MATCH (gen: Generation)
-RETURN gen AS BOX (Background = hash (gen.Generation), Label = gen.Name, LabelPosition = InnerCenter)
-
-DRAW Memory (0xDDE51000, 0xDFE51000, Width = 1M)
-```
-
-![MQL1](/doc/mql11.png)
-
-Thanks to DRAW command and expressiveness of MQL, drawing fragmentation is as easy as:
-
-```
-MATCH (obj: Object)
-WHERE obj.Type = "Free"
-RETURN obj AS BOX
-
-DRAW Memory (0xDDE51000, 0xDFE51000, Width = 1M)
-```
-
-![MQL1](/doc/mql12.png)
-
-Implementation milestones and current status are tracked in [the roadmap](https://github.com/kkokosa/MemoryVisualizer/issues/5), not in these historical examples.
+Implementation milestones are tracked in [the roadmap](https://github.com/kkokosa/MemoryVisualizer/issues/5).

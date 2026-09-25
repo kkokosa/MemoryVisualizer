@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/MemoryVisualizer.Analysis.ClrMd/MemoryVisualizer.Analysis.ClrMd.fsproj" />
+    <ProjectReference Include="../../src/MemoryVisualizer.Query/MemoryVisualizer.Query.fsproj" />
     <ProjectReference Include="../MemoryVisualizer.DumpFixture/MemoryVisualizer.DumpFixture.fsproj" ReferenceOutputAssembly="false" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -12,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/MemoryVisualizer.Cli/Inspect.fs" Link="Inspect.fs" />
+    <Compile Include="../../src/MemoryVisualizer.Cli/QueryCommand.fs" Link="QueryCommand.fs" />
     <Compile Include="ReaderTests.fs" />
     <Compile Include="DacDownloadTests.fs" />
     <Compile Include="DumpMutation.fs" />
