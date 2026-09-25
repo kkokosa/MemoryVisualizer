@@ -63,19 +63,29 @@ architecture must match the target before DAC loading. Initial validation is
 for generated, heap-containing, framework-dependent .NET 11 RC1 dumps. `WithHeap`
 is the CI default; `Full` has also been exercised separately.
 
-| Host / worker                             | Target                             | Status                                                                                           |
-| ----------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Windows x64                               | Windows x64, .NET 11 RC1           | Generated heap-containing dump integration verified locally; Full also exercised                 |
-| Ubuntu 24.04 glibc x64                    | Linux x64, .NET 11 RC1             | Generated dump integration verified in WSL; target-version recovery required with this ClrMD pin |
-| macOS arm64                               | macOS arm64, .NET 11 RC1           | Automated generated-dump gate; not locally certified                                             |
-| macOS x64                                 | macOS x64, .NET 11 RC1             | Automated generated-dump gate; not locally certified                                             |
-| Windows x64                               | .NET Framework x64 / older CoreCLR | Matching DAC mechanism exists; not in the verified fixture matrix                                |
-| Any cross-OS or cross-architecture pair   | Any                                | Rejected with a matching-worker recommendation                                                   |
-| x86, ARM32, Linux arm64/musl, single-file | Any                                | Not supported in the initial policy                                                              |
+The hosted **Unit and generated offline-DAC snapshot integration tests** step
+passed on all four hosts in
+[run 36175451197, attempt 1](https://github.com/kkokosa/MemoryVisualizer/actions/runs/36175451197/attempts/1)
+at commit `3156660cfb66dd1c75e9bdf775f8f368ebea8769`. Each host passed all
+106 .NET tests (30 analysis, 68 hosting, 8 core), including generated `WithHeap`
+extraction with an explicit trusted DAC and network disabled. Strict assertions
+for complete memory maps, object/type identity, references, roots/handles,
+privacy, disposal, and honest partial results remained enabled.
 
-This is not a minimum-OS/package certification table. Mac and hosted CI results
-must be observed before claiming those platforms certified. Missing runtime
-modules, mini/triage dumps, native-only dumps, GC-in-progress dumps, truncated
+| Host / worker                             | Target                             | Status                                                                                               |
+| ----------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Windows x64                               | Windows x64, .NET 11 RC1           | Hosted WithHeap/offline-DAC integration passed; Full also verified locally                           |
+| Ubuntu 24.04 glibc x64                    | Linux x64, .NET 11 RC1             | Hosted WithHeap/offline-DAC integration passed; target-version recovery required with this ClrMD pin |
+| macOS arm64                               | macOS arm64, .NET 11 RC1           | Hosted WithHeap/offline-DAC integration passed                                                       |
+| macOS x64                                 | macOS x64, .NET 11 RC1             | Hosted WithHeap/offline-DAC integration passed                                                       |
+| Windows x64                               | .NET Framework x64 / older CoreCLR | Matching DAC mechanism exists; not in the verified fixture matrix                                    |
+| Any cross-OS or cross-architecture pair   | Any                                | Rejected with a matching-worker recommendation                                                       |
+| x86, ARM32, Linux arm64/musl, single-file | Any                                | Not supported in the initial policy                                                                  |
+
+This records the .NET/native extraction gate, not a claim that the entire
+workflow passed. It does not certify arbitrary dumps, minimum OS versions, or
+packaged applications. Missing runtime modules, mini/triage dumps, native-only
+dumps, GC-in-progress dumps, truncated
 files, absent pages, or incompatible DACs can produce errors or partial results.
 
 ## Materialization and meaning
