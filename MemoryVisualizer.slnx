@@ -6,6 +6,8 @@
     <Project Path="src/MemoryVisualizer.Worker/MemoryVisualizer.Worker.fsproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/MemoryVisualizer.Analysis.Tests/MemoryVisualizer.Analysis.Tests.fsproj" />
+    <Project Path="tests/MemoryVisualizer.DumpFixture/MemoryVisualizer.DumpFixture.fsproj" />
     <Project Path="tests/MemoryVisualizer.Core.Tests/MemoryVisualizer.Core.Tests.fsproj" />
     <Project Path="tests/MemoryVisualizer.Hosting.Tests/MemoryVisualizer.Hosting.Tests.fsproj" />
   </Folder>
