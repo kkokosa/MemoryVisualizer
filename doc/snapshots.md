@@ -35,7 +35,8 @@ writes. Explicit paths take precedence and never fall back silently.
 **only on Windows**. It contacts the fixed official HTTPS endpoint
 `https://msdl.microsoft.com/download/symbols/` (and its redirects), disclosing
 runtime binary name/build identifiers, not the dump or heap contents. Downloads
-are cancellable, have a 60-second timeout and 64 MiB size cap, and are written
+are cancellable, have a 60-second deadline covering headers and the entire
+response body plus a 64 MiB size cap, and are written
 through unique temporary files. ClrMD Windows DAC signature verification stays
 enabled; `CreateRuntime(path, false)` retains version matching. A failed
 download/cache/library load is visible and actionable.
@@ -178,6 +179,12 @@ same-named types from different dynamic assemblies. Tests cover offline explicit
 DAC success, missing/corrupt inputs/DACs, budgets, strings, cancellation, and
 post-disposal data/file access. A copy of the synthetic dump is deliberately
 modified to hide a heap range; it must not become complete success.
+Before extraction, the native reader must independently confirm the modified
+address is unreadable. Synthetic x64/arm64 Mach-O header tests exercise this
+mutation on every host, including preservation of unrelated segment bytes.
+HTTP tests use an in-process fake handler to prove stalled DAC response bodies
+honor both the whole-download deadline and caller cancellation without network
+access or leftover cache files.
 
 The four-host CI matrix runs the same test suite with a process-level timeout.
 Tests delete their temporary files; CI never uploads raw dumps or heap

@@ -13,7 +13,9 @@
   <ItemGroup>
     <Compile Include="../../src/MemoryVisualizer.Cli/Inspect.fs" Link="Inspect.fs" />
     <Compile Include="ReaderTests.fs" />
+    <Compile Include="DacDownloadTests.fs" />
     <Compile Include="DumpMutation.fs" />
+    <Compile Include="DumpMutationTests.fs" />
     <Compile Include="IntegrationTests.fs" />
   </ItemGroup>
 </Project>

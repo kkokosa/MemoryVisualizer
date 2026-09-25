@@ -100,15 +100,25 @@ module internal DacResolver =
         else
             None
 
-    let private download (parts: string array) (destination: string) (token: CancellationToken) =
-        use client = new HttpClient(Timeout = TimeSpan.FromSeconds(60.0))
+    let downloadWithClient
+        (client: HttpClient)
+        timeout
+        (parts: string array)
+        (destination: string)
+        (token: CancellationToken)
+        =
+        use deadline = CancellationTokenSource.CreateLinkedTokenSource(token)
+        deadline.CancelAfter(timeout: TimeSpan)
+        let downloadToken = deadline.Token
 
         let uri =
             "https://msdl.microsoft.com/download/symbols/"
             + String.Join("/", parts |> Array.map Uri.EscapeDataString)
 
         use request = new HttpRequestMessage(HttpMethod.Get, uri)
-        use response = client.Send(request, HttpCompletionOption.ResponseHeadersRead, token)
+
+        use response =
+            client.Send(request, HttpCompletionOption.ResponseHeadersRead, downloadToken)
 
         if response.StatusCode = HttpStatusCode.NotFound then
             false
@@ -118,7 +128,7 @@ module internal DacResolver =
             let temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp"
 
             try
-                use source = response.Content.ReadAsStream(token)
+                use source = response.Content.ReadAsStream(downloadToken)
 
                 use output =
                     new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)
@@ -128,10 +138,10 @@ module internal DacResolver =
                 let mutable reading = true
 
                 while reading do
-                    token.ThrowIfCancellationRequested()
+                    downloadToken.ThrowIfCancellationRequested()
 
                     let count =
-                        source.ReadAsync(buffer.AsMemory(), token).AsTask().GetAwaiter().GetResult()
+                        source.ReadAsync(buffer.AsMemory(), downloadToken).AsTask().GetAwaiter().GetResult()
 
                     if count = 0 then
                         reading <- false
@@ -144,11 +154,16 @@ module internal DacResolver =
                         output.Write(buffer, 0, count)
 
                 output.Dispose()
+                downloadToken.ThrowIfCancellationRequested()
                 File.Move(temporary, destination, true)
                 true
             finally
                 if File.Exists temporary then
                     File.Delete temporary
+
+    let private download parts destination token =
+        use client = new HttpClient(Timeout = Timeout.InfiniteTimeSpan)
+        downloadWithClient client (TimeSpan.FromSeconds(60.0)) parts destination token
 
     let resolve (policy: DacPolicy) index (info: ClrInfo) (token: CancellationToken) =
         token.ThrowIfCancellationRequested()

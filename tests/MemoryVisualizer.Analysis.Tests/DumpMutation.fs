@@ -102,6 +102,9 @@ let private mutate path address replacement =
                 let fileOffset = reader.ReadUInt64()
 
                 visit start length fileOffset (fun () ->
+                    // The stream-based ClrMD Mach-O reader maps VMSize, not FileSize.
+                    at (command + 32L)
+                    writer.Write(0UL)
                     at (command + 48L)
                     writer.Write(0UL))
 

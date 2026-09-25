@@ -494,6 +494,25 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
                 File.Copy(fixture.Path, damaged)
                 DumpMutation.hideMemoryRange damaged target.Identity.Address
 
+                let missing =
+                    use probe =
+                        DataTarget.LoadDump(
+                            damaged,
+                            DataTargetOptions(
+                                SkipRuntimeEnumeration = true,
+                                SymbolPaths = [||],
+                                FileLocator = NoFileLocator()
+                            )
+                        )
+
+                    let mutable pointer = 0UL
+                    not (probe.DataReader.ReadPointer(target.Identity.Address, &pointer))
+
+                Assert.True(
+                    missing,
+                    "The mutation must actually remove the fixture object's memory from the native reader."
+                )
+
                 let! result =
                     ClrMdSnapshotReader().ReadSnapshotAsync(damaged, options, None, CancellationToken.None)
 
