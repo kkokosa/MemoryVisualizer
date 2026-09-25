@@ -173,7 +173,11 @@ dotnet test tests/MemoryVisualizer.Analysis.Tests -c Release --no-restore
 
 The tests spawn only `MemoryVisualizer.DumpFixture`, confirm the reported child
 PID, and capture that child's full dump via the pinned transitive diagnostics
-client. The fixture uses synthetic cycles, shared references, arrays, LOH/POH,
+client. Both child output pipes are continuously drained after readiness, with
+only a 4,096-character tail retained per pipe. Full-dump capture has a finite
+three-minute limit inside the ten-minute test-job gate; a timeout reports
+child status, generated file size, and bounded diagnostics without retries.
+The fixture uses synthetic cycles, shared references, arrays, LOH/POH,
 pinned/weak handles, dependent-handle chains, an interior stack byref, and
 same-named types from different dynamic assemblies. Tests cover offline explicit
 DAC success, missing/corrupt inputs/DACs, budgets, strings, cancellation, and

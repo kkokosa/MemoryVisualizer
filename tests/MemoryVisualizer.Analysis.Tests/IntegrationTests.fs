@@ -55,35 +55,77 @@ type GeneratedDump() =
         if not (child.Start()) then
             failwith "Synthetic fixture process failed to start."
 
-        let stderr = child.StandardError.ReadToEndAsync()
+        let stdout = ProcessOutput(4096)
+        let stderr = ProcessOutput(4096)
+        let stderrDrain = stderr.DrainAsync child.StandardError
+        let mutable stdoutDrain = Task.CompletedTask
+        let mutable captured = false
 
         try
             let line =
                 child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds 30.0).GetAwaiter().GetResult()
 
             if isNull line then
-                failwithf "Fixture failed: %s" (stderr.GetAwaiter().GetResult())
+                failwithf "Fixture exited before readiness. stderr tail: %s" stderr.Tail
+
+            stdoutDrain <- stdout.DrainAsync(child.StandardOutput)
 
             use ready = JsonDocument.Parse line
             Assert.Equal("ready", ready.RootElement.GetProperty("status").GetString())
             Assert.Equal(child.Id, ready.RootElement.GetProperty("processId").GetInt32())
             dacPath <- ready.RootElement.GetProperty("dacPath").GetString()
             Assert.True(Path.IsPathFullyQualified dacPath && File.Exists dacPath)
-            use timeout = new CancellationTokenSource(TimeSpan.FromSeconds 90.0)
+            let captureLimit = TimeSpan.FromMinutes(3.0)
+            use timeout = new CancellationTokenSource(captureLimit)
 
-            DiagnosticsClient(child.Id)
-                .WriteDumpAsync(DumpType.Full, dumpPath, false, timeout.Token)
-                .GetAwaiter()
-                .GetResult()
+            try
+                DiagnosticsClient(child.Id)
+                    .WriteDumpAsync(DumpType.Full, dumpPath, false, timeout.Token)
+                    .GetAwaiter()
+                    .GetResult()
+            with :? OperationCanceledException when timeout.IsCancellationRequested ->
+                let size =
+                    if File.Exists dumpPath then
+                        FileInfo(dumpPath).Length
+                    else
+                        0L
+
+                let status =
+                    if child.HasExited then
+                        $"exited ({child.ExitCode})"
+                    else
+                        "running"
+
+                failwithf
+                    "Synthetic full-dump capture exceeded %.0f seconds; child %d is %s; dump bytes=%d. stdout tail: %s stderr tail: %s"
+                    captureLimit.TotalSeconds
+                    child.Id
+                    status
+                    size
+                    stdout.Tail
+                    stderr.Tail
 
             child.StandardInput.WriteLine("release")
             child.StandardInput.Close()
             child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds 15.0).GetAwaiter().GetResult()
             Assert.Equal(0, child.ExitCode)
+            captured <- true
         finally
-            if not child.HasExited then
-                child.Kill(true)
-                child.WaitForExit()
+            let mutable outputClosed = false
+
+            try
+                if not child.HasExited then
+                    child.Kill(true)
+
+                    if not (child.WaitForExit(10_000)) then
+                        failwith "Synthetic fixture did not exit within ten seconds after termination."
+
+                Task.WhenAll(stdoutDrain, stderrDrain).WaitAsync(TimeSpan.FromSeconds(10.0)).GetAwaiter().GetResult()
+                outputClosed <- true
+            finally
+                if not captured || not outputClosed then
+                    File.Delete dumpPath
+                    Directory.Delete directory
 
     member _.Path = dumpPath
     member _.Directory = directory

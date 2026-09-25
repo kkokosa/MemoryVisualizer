@@ -16,6 +16,8 @@
     <Compile Include="DacDownloadTests.fs" />
     <Compile Include="DumpMutation.fs" />
     <Compile Include="DumpMutationTests.fs" />
+    <Compile Include="ProcessOutput.fs" />
+    <Compile Include="ProcessOutputTests.fs" />
     <Compile Include="IntegrationTests.fs" />
   </ItemGroup>
 </Project>
