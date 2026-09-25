@@ -1,0 +1,62 @@
+name: Foundation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Pin npm
+        run: npm install --global npm@11.19.0
+      - name: Install workspace dependencies
+        run: npm ci
+      - name: Typecheck workspace and check formatting
+        run: npm run typecheck
+      - run: npm run format:check
+      - name: Restore pinned F# formatter
+        run: dotnet tool restore
+      - run: dotnet fantomas --check src tests
+      - name: Restore locked packages
+        run: dotnet restore MemoryVisualizer.slnx --locked-mode
+      - name: Build
+        run: dotnet build MemoryVisualizer.slnx -c Release --no-restore
+      - name: Unit tests
+        run: dotnet test MemoryVisualizer.slnx -c Release --no-build --no-restore
+      - name: Executable smoke tests
+        run: npm run smoke
+      - name: Build worker for host RID
+        run: dotnet build src/MemoryVisualizer.Worker -c Release --no-restore -r ${{ matrix.rid }} --self-contained false
+      - name: Build CLI for host RID
+        run: dotnet build src/MemoryVisualizer.Cli -c Release --no-restore -r ${{ matrix.rid }} --self-contained false
+      - name: RID executable smoke tests
+        run: npm run smoke
+        env:
+          RUNTIME_IDENTIFIER: ${{ matrix.rid }}

@@ -1,0 +1,13 @@
+{
+  "name": "@memoryvisualizer/desktop",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "electron": "44.4.2",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../MemoryVisualizer.Core/MemoryVisualizer.Core.fsproj" />
+    <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="4.1.745802" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="ClrMdSnapshotReader.fs" />
+  </ItemGroup>
+</Project>

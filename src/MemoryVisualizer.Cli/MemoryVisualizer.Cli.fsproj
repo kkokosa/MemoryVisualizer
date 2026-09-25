@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../MemoryVisualizer.Analysis.ClrMd/MemoryVisualizer.Analysis.ClrMd.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/CommandLine.fs" Link="CommandLine.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+</Project>

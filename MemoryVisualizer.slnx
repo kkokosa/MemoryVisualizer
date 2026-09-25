@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MemoryVisualizer.Analysis.ClrMd/MemoryVisualizer.Analysis.ClrMd.fsproj" />
+    <Project Path="src/MemoryVisualizer.Cli/MemoryVisualizer.Cli.fsproj" />
+    <Project Path="src/MemoryVisualizer.Core/MemoryVisualizer.Core.fsproj" />
+    <Project Path="src/MemoryVisualizer.Worker/MemoryVisualizer.Worker.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MemoryVisualizer.Core.Tests/MemoryVisualizer.Core.Tests.fsproj" />
+    <Project Path="tests/MemoryVisualizer.Hosting.Tests/MemoryVisualizer.Hosting.Tests.fsproj" />
+  </Folder>
+</Solution>
