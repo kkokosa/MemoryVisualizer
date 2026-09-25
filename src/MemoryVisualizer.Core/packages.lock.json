@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net11.0": {
+      "FSharp.Core": {
+        "type": "Direct",
+        "requested": "[11.0.101-rc1.26425.128, )",
+        "resolved": "11.0.101-rc1.26425.128",
+        "contentHash": "IXKJwuqgq5HwFWw1gM27SYl8Ztgb4tTPA7b3hn3ePv0cobG/iLBZ9c9a0VLzSPxT8QH7ZSxIdYCT5NtvTIcYww=="
+      }
+    },
+    "net11.0/linux-x64": {},
+    "net11.0/osx-arm64": {},
+    "net11.0/osx-x64": {},
+    "net11.0/win-x64": {}
+  }
+}

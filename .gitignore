@@ -1,7 +1,22 @@
-.vs
-packages
-obj
-bin
+.vs/
+.idea/
+**/bin/
+**/obj/
+/.tools/
+**/TestResults/
+**/node_modules/
+**/dist/
+**/coverage/
+*.user
+*.suo
+*.log
+.DS_Store
+Thumbs.db
 
-.paket/paket.exe
-paket-files
+# Never accidentally add new memory dumps or local credentials.
+*.dmp
+*.dump
+/data/**/*.core
+.env
+.env.*
+!.env.example
