@@ -239,6 +239,35 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
             Assert.True(stream.Length > 0L)
             // No native handles or deferred enumerators are needed to use the materialized graph.
             Assert.NotEmpty(value.Types |> Array.choose _.Name)
+
+            use store =
+                IndexedHeapSnapshot.Create(value, SnapshotIndexLimits.defaults, CancellationToken.None)
+                |> Result.defaultWith (fun error -> failwithf "Generated snapshot could not be indexed: %A" error)
+
+            let selectedType = duplicates[0].Type
+
+            let selected =
+                store.SelectObjects(
+                    {
+                        ObjectSelection.all with
+                            Type = Some selectedType
+                    },
+                    { Offset = 0; Limit = 128 },
+                    CancellationToken.None
+                )
+                |> Result.defaultWith (fun error -> failwithf "Indexed selection failed: %A" error)
+
+            let expected =
+                value.Objects
+                |> Array.filter (fun item -> item.Type = selectedType)
+                |> Array.sortBy _.Identity.Address
+
+            Assert.Equal<HeapObject array>(expected, Seq.toArray selected.Items)
+            Assert.False selected.IsTruncated
+            Assert.False selected.IsPartial
+
+            for item in selected.Items do
+                Assert.Equal(Ok(Some item), store.TryGetObject(item.Identity, CancellationToken.None))
         }
 
     [<Fact>]

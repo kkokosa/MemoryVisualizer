@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ContractTests.fs" />
+    <Compile Include="IndexedHeapSnapshotTests.fs" />
   </ItemGroup>
 </Project>
