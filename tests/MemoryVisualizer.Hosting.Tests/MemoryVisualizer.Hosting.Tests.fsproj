@@ -11,6 +11,14 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/Shared/CommandLine.fs" Link="CommandLine.fs" />
+    <Compile Include="../../src/MemoryVisualizer.Worker/Protocol.fs" Link="Protocol.fs" />
+    <Compile Include="../../src/MemoryVisualizer.Worker/Transport.fs" Link="Transport.fs" />
+    <Compile Include="../../src/MemoryVisualizer.Worker/Worker.fs" Link="Worker.fs" />
     <Compile Include="HostingTests.fs" />
+    <Compile Include="ProtocolTests.fs" />
+    <Compile Include="WorkerTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../protocol/fixtures.json" Link="fixtures.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

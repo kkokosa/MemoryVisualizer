@@ -2,7 +2,7 @@
 
 MemoryVisualizer is being rebuilt as a local-first, cross-platform tool for turning .NET memory into reproducible, publication-quality diagrams. The architecture is F#/.NET 11 analysis and scene computation, a headless CLI, and a TypeScript/Electron desktop shell. See the [roadmap (#5)](https://github.com/kkokosa/MemoryVisualizer/issues/5).
 
-**Implemented now:** the foundation from [#6](https://github.com/kkokosa/MemoryVisualizer/issues/6): SDK-style projects, snapshot IDs and DTOs, an isolated ClrMD adapter boundary, executable help/version commands, and build/test tooling. **Not implemented:** dump loading, MQL, graph storage, layout/rendering, exports, a desktop window, or worker IPC. The old WPF/FsXaml application and Neo4j/Java/Paket startup dependencies have been removed rather than ported.
+**Implemented now:** the [#6](https://github.com/kkokosa/MemoryVisualizer/issues/6) foundation and [#7](https://github.com/kkokosa/MemoryVisualizer/issues/7) versioned, bounded worker protocol: native worker lifecycle, cancellation, shared F#/TypeScript contracts, and a sandboxed Electron test shell with a deterministic fake backend. **Not implemented:** real dump loading, MQL, graph storage, layout/rendering, exports, packaging, or the desktop workspace UX. The old WPF/FsXaml application and Neo4j/Java/Paket startup dependencies have been removed rather than ported.
 
 ## Quick start
 
@@ -27,6 +27,9 @@ dotnet test MemoryVisualizer.slnx -c Release --no-build --no-restore
 npm ci
 npm run typecheck
 npm run smoke
+npm run test:protocol
+npm run electron:install
+npm run test:electron
 dotnet fantomas --check src tests
 npm run format:check
 ```
@@ -40,7 +43,7 @@ dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore
 dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore -- --version
 ```
 
-No arguments also prints help and exits. Unsupported arguments return exit code `2`, write a diagnostic to stderr, and leave stdout empty. Help/version return `0`. The worker does **not** read stdin or start a protocol loop yet.
+No arguments also prints help and exits. Unsupported arguments return exit code `2`, write a diagnostic to stderr, and leave stdout empty. Help/version return `0`. Only the worker's explicit `--protocol --backend=fake` invocation starts the stdio protocol; ordinary help/version commands never wait for stdin. The CLI remains a help/version scaffold.
 
 `npm run smoke` executes both DLL and native apphost forms of both programs, checking actual exit codes, stdout/stderr, help/version aliases, invalid arguments, and output paths. It defaults to `Release`; set `CONFIGURATION=Debug` to check a Debug build. Set `RUNTIME_IDENTIFIER` to the host RID after a RID-specific build. These are environment variables (use `$env:NAME = "value"` in PowerShell).
 
@@ -50,7 +53,45 @@ Ordinary NuGet `PackageReference` plus committed `packages.lock.json` files pin 
 
 The RC SDK bundles FSharp.Core packages with different Windows/Linux content hashes despite the same version. `DisableImplicitLibraryPacksFolder` deliberately disables that SDK-local package feed so all platforms restore the canonical nuget.org package and share identical lock hashes. This is an observed prerelease reproducibility gap, not a framework retarget or relaxed lock check.
 
-The root npm workspace owns the single `package-lock.json`; run npm commands from the root, not a separate desktop install. TypeScript `7.0.2`, Electron `44.4.2`, and Prettier `3.9.8` are exact pins. `.npmrc` disables dependency lifecycle scripts: the Electron package/types are installed, but no Electron runtime is downloaded or launched in this foundation. `desktop/src/index.ts` is deliberately only a module marker. Main/preload/renderer entry points, React/Vite, runtime installation, packaging and IPC belong to [#7](https://github.com/kkokosa/MemoryVisualizer/issues/7), [#13](https://github.com/kkokosa/MemoryVisualizer/issues/13), and [#15](https://github.com/kkokosa/MemoryVisualizer/issues/15).
+The root npm workspace owns the single `package-lock.json`; run npm commands from the root, not a separate desktop install. TypeScript `7.0.2`, Electron `44.4.2`, and Prettier `3.9.8` are exact pins. `.npmrc` still disables dependency lifecycle scripts. `npm run electron:install` explicitly allowlists only the pinned Electron package's official runtime installer (including its checksum verification); it does not enable arbitrary install scripts. `npm run build:desktop` compiles main, the single-file sandbox-compatible preload, and tests. React/Vite/workspace UX and packaging remain in [#13](https://github.com/kkokosa/MemoryVisualizer/issues/13) and [#15](https://github.com/kkokosa/MemoryVisualizer/issues/15).
+
+### Worker bridge and synthetic test shell
+
+The normative [worker protocol](doc/worker-protocol.md) specifies v1 handshake,
+extension/version rejection, request and snapshot IDs, typed results/errors,
+cancellation, and shutdown. Shared fixtures in `protocol/fixtures.json` are
+validated independently by F# and TypeScript. Exact limits are 65,536 UTF-8 bytes
+per frame, 8 outstanding requests, 128 page/scene items, JSON depth 16, and at most
+one progress event per request per 100 ms. Writers honor pipe backpressure;
+progress is coalesced, and stalled peers have finite deadlines. uint64 values
+remain canonical strings, including `18446744073709551615`.
+
+After building the solution and desktop and explicitly installing Electron,
+launch `node_modules/.bin/electron desktop` (PowerShell:
+`.\node_modules\.bin\electron.cmd desktop`). The test shell can load, cancel,
+and dispose a synthetic fixture. It cannot select files, analyze dumps, run MQL,
+or produce a real export. Main spawns the explicit native apphost with separate
+arguments and `shell: false`; there is no server and no Node utility-process
+substitution. `RUNTIME_IDENTIFIER` chooses an already built host-RID output.
+Release portable output is the default, and requires the pinned .NET runtime.
+Self-contained distribution is deliberately left to packaging work.
+
+The renderer has no Node integration, raw IPC, process, filesystem, or arbitrary
+path API. Context isolation and the Chromium sandbox remain enabled. The preload
+rejects oversized/invalid arguments before IPC, caps in-flight invocations at 8,
+and coalesces repeated cancellation. Main checks
+the originating window, its main frame and exact local URL, then validates each
+operation again. Snapshot replacement/disposal suppresses stale results. Crashes
+and timeouts reject pending work without automatic analysis retries. Only the
+owned child is force-terminated after failed shutdown; default logs omit payloads
+and dependency stderr. Startup/request/shutdown deadlines are 5/10/2 seconds.
+
+`npm run test:protocol` builds TypeScript and runs shared-fixture, framing, and
+real native-process lifecycle tests. `npm run test:electron` runs the real
+sandboxed preload, rejects an unauthorized second window, exercises cancellation
+and disposal, closes the app with work active, and verifies its worker has exited.
+Linux headless hosts need a display (`xvfb-run -a npm run test:electron`), Chromium
+native libraries, and a working Chromium sandbox; do not use `--no-sandbox`.
 
 Format F# with `dotnet fantomas src tests`; format JSON, TypeScript, JavaScript, YAML and Markdown with `npm run format`. `.editorconfig` sets LF, UTF-8, four-space F# and two-space metadata/TypeScript indentation. Fantomas is permitted to run on a newer installed runtime, including the pinned .NET 11 prerelease, without changing its pinned tool version.
 
@@ -62,16 +103,16 @@ For an intentional dependency update, edit exact manifest versions, run `dotnet 
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/MemoryVisualizer.Core`            | Platform-neutral snapshot-local IDs, minimal snapshot/object records, DTO conversion, and an analysis interface. No ClrMD, native, UI, JSON framework, or Electron dependency. Query and scene modules can be added here separately without multiplying assemblies. |
 | `src/MemoryVisualizer.Analysis.ClrMd`  | The only ClrMD reference. Implements the core interface with an explicit `NotImplemented` error until extraction work lands; respects cancellation and never opens a dump. Only core types cross its public boundary.                                               |
-| `src/MemoryVisualizer.Worker`          | Future analysis/query process; help/version scaffold only.                                                                                                                                                                                                          |
+| `src/MemoryVisualizer.Worker`          | Bounded v1 protocol host and deterministic fake backend; real analysis/query operations remain deferred.                                                                                                                                                            |
 | `src/MemoryVisualizer.Cli`             | Future headless query/export host; help/version scaffold only, not an IPC client.                                                                                                                                                                                   |
 | `src/Shared/CommandLine.fs`            | Shared hosting-only source linked into the executables and hosting tests; CLI concerns do not enter the core.                                                                                                                                                       |
 | `tests/MemoryVisualizer.Core.Tests`    | Contract, identity and lossless serialization tests, with no adapter reference or native loading.                                                                                                                                                                   |
 | `tests/MemoryVisualizer.Hosting.Tests` | Argument handling, explicit unimplemented analysis and cancellation, plus managed ClrMD assembly loading.                                                                                                                                                           |
-| `desktop`                              | Private npm TypeScript/Electron workspace reserved for the desktop issue.                                                                                                                                                                                           |
+| `desktop`                              | Typed worker owner, narrow preload API, synthetic sandboxed test shell, and native/Electron lifecycle tests.                                                                                                                                                        |
 
 `SnapshotId` is a nonempty UUID. `ObjectId`, `TypeId` and `SegmentId` are distinct nonzero unsigned 64-bit identifiers, allocated within one snapshot and entity kind; they are **not** addresses, indices shared across snapshots, or runtime handles. An `ObjectReference` includes both snapshot and object ID, so the same local number in two snapshots refers to different objects. The eventual extractor owns deterministic allocation and persistence; this scaffold allocates no heap IDs and promises no cross-dump identity.
 
-Core addresses and sizes are `uint64`. Boundary DTOs carry a schema version (`1`), lowercase UUID text, decimal strings for IDs/counts/sizes, and `0x` plus sixteen lowercase hexadecimal digits for addresses. This preserves values beyond JavaScript's safe-integer range. Snapshot scope is present on every object DTO; its type ID has that same scope. DTOs contain only primitives, not ClrMD handles or UI objects. They are output contracts, not yet an input validator, scene schema, or stdio envelope; protocol negotiation and inbound validation belong to #7. The core does not serialize itself: the host will own JSON policy and framing.
+Core addresses and sizes are `uint64`. Boundary DTOs carry a schema version (`1`), lowercase UUID text, decimal strings for IDs/counts/sizes, and `0x` plus sixteen lowercase hexadecimal digits for addresses. This preserves values beyond JavaScript's safe-integer range. Snapshot scope is present on every object DTO; its type ID has that same scope. DTOs contain only primitives, not ClrMD handles or UI objects. The worker owns strict input/output validation and framing; the core remains transport-independent. The synthetic scene envelope is not the future geometry/layout schema.
 
 ## Output layout and CI
 
@@ -93,7 +134,7 @@ dotnet build src/MemoryVisualizer.Cli -c Release --no-restore -r win-x64 --self-
 
 This produces `bin/MemoryVisualizer.Worker/Release/net11.0/win-x64/MemoryVisualizer.Worker.exe` and an independent CLI directory. The SDK rejects solution-wide RID builds, so target the individual projects. All four RID targets are already restored; do not use `dotnet restore -r <RID>`, which replaces the declared RID set and invalidates the shared locks. Generated outputs, local tools, npm installs, test results and new dumps are ignored. Existing historical dump files remain unchanged and are **not** used by tests or uploaded.
 
-The GitHub Actions matrix covers Windows x64 (`windows-2025`), Linux x64 (`ubuntu-24.04`), macOS arm64 (`macos-15`) and macOS x64 (`macos-15-intel`). Each job restores locked dependencies, checks formatting and TypeScript, builds, runs unit tests, and smokes portable and host-RID executables. This is a managed foundation matrix, not a supported dump-analysis or packaged-desktop matrix. Adding CI does not itself establish that every remote OS run has passed.
+The GitHub Actions matrix covers Windows x64 (`windows-2025`), Linux x64 (`ubuntu-24.04`), macOS arm64 (`macos-15`) and macOS x64 (`macos-15-intel`). Each job restores locked dependencies, checks formatting and TypeScript, builds, runs unit/shared-contract tests, smokes portable and host-RID executables, and runs native-worker and real sandboxed Electron lifecycle tests. Linux uses Xvfb and the official Chromium sandbox helper. This is a source-built protocol matrix, not a supported dump-analysis or packaged-desktop matrix. Adding CI does not itself establish that every remote OS run has passed.
 
 The managed ClrMD dependency can be loaded without invoking DAC/native analysis. Native DAC resolution, dump/host OS and architecture compatibility, supported runtime versions, packaging and minimum OS requirements remain unverified and belong to #8/#15. Neither the scaffold nor its tests access symbols, download DACs, inspect historical dumps, or upload heap contents. Historical #1/#2/#4 and foundation #6 are not automatically closed by this change.
 

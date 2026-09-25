@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>MemoryVisualizer protocol test shell</title>
+  </head>
+  <body>
+    <h1>MemoryVisualizer protocol test shell</h1>
+    <p>Synthetic backend only. No dump is read, no query is executed, and no file is exported.</p>
+    <button id="load">Load synthetic fixture</button>
+    <button id="cancel">Cancel</button>
+    <button id="dispose">Dispose snapshot</button>
+    <output id="status">Ready</output>
+    <script src="shell.js"></script>
+  </body>
+</html>
