@@ -32,7 +32,7 @@ let private identity index address : ObjectIdentity = {
 
 let private high = 9007199254740993UL
 
-let private fixture () =
+let internal fixture () =
     let runtimeInfo index = {
         Identity = runtime index
         Version = "synthetic"

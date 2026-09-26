@@ -7,7 +7,7 @@ open MemoryVisualizer.Hosting
 
 [<EntryPoint>]
 let main arguments =
-    if arguments.Length > 0 && arguments[0] = "inspect" then
+    if arguments.Length > 0 && (arguments[0] = "inspect" || arguments[0] = "query") then
         use cancellation = new CancellationTokenSource()
 
         let cancel =
@@ -18,7 +18,13 @@ let main arguments =
         Console.CancelKeyPress.AddHandler cancel
 
         try
-            Inspect.run arguments[1..] Console.Out Console.Error cancellation.Token
+            let run =
+                if arguments[0] = "query" then
+                    QueryCommand.run
+                else
+                    Inspect.run
+
+            run arguments[1..] Console.Out Console.Error cancellation.Token
         finally
             Console.CancelKeyPress.RemoveHandler cancel
     else
@@ -30,5 +36,6 @@ let main arguments =
             && (arguments.Length = 0 || Array.contains arguments[0] [| "--help"; "-h"; "help" |])
         then
             Console.Out.WriteLine("\nDump analysis: " + Inspect.usage)
+            Console.Out.WriteLine("\nMQL (rows/instructions, not SVG): " + QueryCommand.usage)
 
         result

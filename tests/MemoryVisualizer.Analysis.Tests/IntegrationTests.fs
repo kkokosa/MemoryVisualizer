@@ -13,6 +13,7 @@ open MemoryVisualizer.Analysis.ClrMd
 open MemoryVisualizer.Cli
 open MemoryVisualizer.Core
 open MemoryVisualizer.Core.Analysis
+open MemoryVisualizer.Query
 open Xunit
 
 type GeneratedDump() =
@@ -268,7 +269,117 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
 
             for item in selected.Items do
                 Assert.Equal(Ok(Some item), store.TryGetObject(item.Identity, CancellationToken.None))
+
+            let query =
+                "MATCH (o:Object) WHERE o.Type = \"MemoryVisualizer.DumpFixture.DuplicatePayload\" RETURN o.Address,o.Size,o.MethodTable AS PIN (Label=o.Type)"
+
+            let plan =
+                Mql.compile QueryLimits.defaults value.Metadata.Id query
+                |> Result.defaultWith (failwithf "%A")
+
+            let queryResult =
+                Mql.execute QueryLimits.defaults plan store (QueryExecutionContext.create CancellationToken.None)
+
+            Assert.Equal(QueryStatus.Complete, queryResult.Status)
+            Assert.False queryResult.SourcePartial
+            Assert.Equal(2, queryResult.Rows.Length)
+            Assert.Equal(2, queryResult.Directives.Length)
+
+            Assert.Equal<Set<TypeIdentity>>(
+                duplicates |> Array.map _.Type |> Set.ofArray,
+                queryResult.Rows |> List.choose _.Entity.TypeIdentity |> Set.ofList
+            )
+
+            Assert.Equal<uint64 array>(
+                duplicates |> Array.map _.Identity.Address |> Array.sort,
+                queryResult.Rows |> List.map _.Entity.Address |> List.toArray
+            )
+
+            for row in queryResult.Rows do
+                Assert.Equal(value.Metadata.Id, row.Entity.Runtime.SnapshotId)
+                Assert.Equal(QueryValue.Unsigned row.Entity.Address, snd row.Values[0])
+                Assert.Equal(QueryValue.Unsigned row.Entity.Size, snd row.Values[1])
         }
+
+    [<Fact>]
+    member _.``Native CLI query uses shared typed pipeline and explicit lossless JSON``() =
+        let dac = fixture.Options.Dac.TrustedPaths[0]
+
+        let source =
+            "MATCH (o:Object) WHERE o.Type = \"MemoryVisualizer.DumpFixture.DuplicatePayload\" RETURN o.Address,o.Size,o.MethodTable"
+
+        let invoke query extras =
+            use stdout = new StringWriter()
+            use stderr = new StringWriter()
+
+            let arguments =
+                Array.concat [ [| fixture.Path; "--dac"; dac; "--query"; query |]; extras ]
+
+            let exit = QueryCommand.run arguments stdout stderr CancellationToken.None
+            exit, stdout.ToString(), stderr.ToString()
+
+        let exit, output, errors = invoke source [||]
+        Assert.Equal(0, exit)
+        Assert.Equal("", errors)
+        use json = JsonDocument.Parse output
+        let root = json.RootElement
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32())
+        Assert.Equal("complete", root.GetProperty("status").GetString())
+        Assert.False(root.GetProperty("sourcePartial").GetBoolean())
+        let rows = root.GetProperty("rows").EnumerateArray() |> Seq.toArray
+        Assert.Equal(2, rows.Length)
+
+        Assert.NotEqual<string>(
+            rows[0].GetProperty("entity").GetProperty("methodTable").GetString(),
+            rows[1].GetProperty("entity").GetProperty("methodTable").GetString()
+        )
+
+        for row in rows do
+            let entity = row.GetProperty("entity")
+            Assert.Equal(root.GetProperty("snapshotId").GetString(), entity.GetProperty("snapshotId").GetString())
+            let hex = entity.GetProperty("address").GetString()
+            let number = UInt64.Parse(hex.Substring(2), Globalization.NumberStyles.HexNumber)
+            let projected = (row.GetProperty("values")[0]).GetProperty("value")
+            Assert.Equal("uint64", projected.GetProperty("kind").GetString())
+
+            Assert.Equal(
+                number.ToString(Globalization.CultureInfo.InvariantCulture),
+                projected.GetProperty("value").GetString()
+            )
+
+            Assert.Equal(JsonValueKind.String, entity.GetProperty("size").ValueKind)
+
+        Assert.DoesNotContain("StringDetail", output)
+        Assert.DoesNotContain(fixture.Path, output)
+        let exit, output, _ = invoke source [| "--max-results"; "1" |]
+        Assert.Equal(3, exit)
+        use json = JsonDocument.Parse output
+        Assert.Equal("truncated", json.RootElement.GetProperty("status").GetString())
+        Assert.Equal("Results", (json.RootElement.GetProperty("truncationReasons")[0]).GetString())
+        Assert.Equal(1, json.RootElement.GetProperty("rows").GetArrayLength())
+        let exit, output, _ = invoke "DRAW Memory(1,2,Runtime=2147483647,Heap=0)" [||]
+        Assert.Equal(2, exit)
+        use json = JsonDocument.Parse output
+        Assert.Equal("failed", json.RootElement.GetProperty("status").GetString())
+        use stdout = new StringWriter()
+        use stderr = new StringWriter()
+
+        let exit =
+            QueryCommand.run
+                [| "does-not-exist.dmp"; "--query"; "MATCH (o:Object) RETURN o.Unknown" |]
+                stdout
+                stderr
+                CancellationToken.None
+
+        Assert.Equal(2, exit)
+        Assert.Contains("MQL203", stdout.ToString())
+        use cancellation = new CancellationTokenSource()
+        cancellation.Cancel()
+
+        let exit =
+            QueryCommand.run [| fixture.Path; "--dac"; dac; "--query"; source |] stdout stderr cancellation.Token
+
+        Assert.Equal(130, exit)
 
     [<Fact>]
     member _.``Cycles shared fields array edges weak handles and dependent chains retain semantics``() =

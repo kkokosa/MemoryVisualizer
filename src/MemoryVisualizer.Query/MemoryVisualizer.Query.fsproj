@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../MemoryVisualizer.Core/MemoryVisualizer.Core.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="Parser.fs" />
+    <Compile Include="Planner.fs" />
+    <Compile Include="Execution.fs" />
+    <Compile Include="Mql.fs" />
+  </ItemGroup>
+</Project>
