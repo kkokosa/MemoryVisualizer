@@ -105,6 +105,13 @@
           "FSharp.Core": "[11.0.101-rc1.26425.128, )",
           "MemoryVisualizer.Core": "[0.1.0-dev, )"
         }
+      },
+      "memoryvisualizer.scene": {
+        "type": "Project",
+        "dependencies": {
+          "FSharp.Core": "[11.0.101-rc1.26425.128, )",
+          "MemoryVisualizer.Query": "[0.1.0-dev, )"
+        }
       }
     },
     "net11.0/linux-x64": {},

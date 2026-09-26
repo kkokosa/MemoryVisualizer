@@ -5,11 +5,13 @@
   <ItemGroup>
     <ProjectReference Include="../MemoryVisualizer.Analysis.ClrMd/MemoryVisualizer.Analysis.ClrMd.fsproj" />
     <ProjectReference Include="../MemoryVisualizer.Query/MemoryVisualizer.Query.fsproj" />
+    <ProjectReference Include="../MemoryVisualizer.Scene/MemoryVisualizer.Scene.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../Shared/CommandLine.fs" Link="CommandLine.fs" />
     <Compile Include="Inspect.fs" />
     <Compile Include="QueryCommand.fs" />
+    <Compile Include="ExportCommand.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 </Project>

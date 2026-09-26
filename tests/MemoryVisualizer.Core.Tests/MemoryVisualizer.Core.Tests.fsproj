@@ -6,6 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/MemoryVisualizer.Core/MemoryVisualizer.Core.fsproj" />
     <ProjectReference Include="../../src/MemoryVisualizer.Query/MemoryVisualizer.Query.fsproj" />
+    <ProjectReference Include="../../src/MemoryVisualizer.Scene/MemoryVisualizer.Scene.fsproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" PrivateAssets="all" />
@@ -14,5 +15,9 @@
     <Compile Include="ContractTests.fs" />
     <Compile Include="IndexedHeapSnapshotTests.fs" />
     <Compile Include="QueryTests.fs" />
+    <Compile Include="SceneTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="fixtures/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
