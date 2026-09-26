@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../MemoryVisualizer.Query/MemoryVisualizer.Query.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="Scene.fs" />
+    <Compile Include="Svg.fs" />
+  </ItemGroup>
+</Project>

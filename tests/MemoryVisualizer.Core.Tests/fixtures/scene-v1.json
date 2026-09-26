@@ -1,0 +1,72 @@
+{
+  "bounds": {
+    "X": 0,
+    "Y": 0,
+    "Width": 1568,
+    "Height": 128
+  },
+  "elements": [
+    {
+      "bounds": {
+        "X": 528,
+        "Y": 56,
+        "Width": 1024,
+        "Height": 16
+      },
+      "id": "element-0",
+      "lane": "lane-0",
+      "layer": 4,
+      "source": {
+        "Runtime": 0,
+        "Heap": 0,
+        "StatementIndex": 0,
+        "Kind": "Box",
+        "Address": "0x0000000000000100",
+        "Size": "16",
+        "SegmentAddress": null,
+        "MethodTable": null
+      },
+      "style": {
+        "Fill": "#ff0000",
+        "Stroke": "#202020",
+        "StrokeWidth": 1
+      },
+      "text": {
+        "Bounds": {
+          "X": 1028,
+          "Y": 57,
+          "Width": 24,
+          "Height": 14
+        },
+        "Lines": [
+          {
+            "Text": "A\u0026B",
+            "X": 1028,
+            "Baseline": 68,
+            "Width": 24
+          }
+        ],
+        "CellWidth": 8,
+        "FontSize": 12,
+        "LineHeight": 14,
+        "Fill": "#000000",
+        "ReplacedCodeUnits": 0,
+        "IsTruncated": false
+      }
+    }
+  ],
+  "lanes": [
+    {
+      "bounds": {
+        "X": 528,
+        "Y": 16,
+        "Width": 1024,
+        "Height": 96
+      },
+      "heap": 0,
+      "id": "lane-0",
+      "runtime": 0
+    }
+  ],
+  "version": 1
+}
