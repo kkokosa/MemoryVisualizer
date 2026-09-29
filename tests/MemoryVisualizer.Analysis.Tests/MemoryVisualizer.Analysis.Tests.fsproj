@@ -24,6 +24,8 @@
     <Compile Include="ProcessOutput.fs" />
     <Compile Include="ProcessOutputTests.fs" />
     <Compile Include="IntegrationTests.fs" />
+    <Compile Include="DesktopTestPaths.fs" />
+    <Compile Include="DesktopTestPathsTests.fs" />
     <Compile Include="DesktopIntegrationTests.fs" />
   </ItemGroup>
 </Project>

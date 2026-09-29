@@ -19,7 +19,10 @@ type DesktopIntegrationTests(fixture: GeneratedDump) =
     [<DesktopFact>]
     member _.``Sandboxed desktop opens generated WithHeap dump through trusted native dialogs``() =
         task {
-            let root = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "..", ".."))
+            let root =
+                DesktopTestPaths.repositoryRoot
+                    AppContext.BaseDirectory
+                    (Environment.GetEnvironmentVariable("MEMORYVISUALIZER_REPOSITORY_ROOT"))
 
             let start =
                 ProcessStartInfo(

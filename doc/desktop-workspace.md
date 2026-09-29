@@ -251,7 +251,11 @@ visibility before cleanup without relying on host timing.
 For the real workflow, first build the solution and desktop and install
 Electron. Set `MEMORYVISUALIZER_DESKTOP_E2E=1`, then run the analysis tests filtered
 to `DesktopIntegrationTests`. On headless Linux wrap the test command in
-`xvfb-run -a`. The fixture creates only its owned child's `WithHeap` dump, supplies
+`xvfb-run -a`. Repository discovery walks upward from the test assembly's runtime
+directory, independently of deterministic compiler/source-link path mappings.
+If build outputs live outside the checkout, set
+`MEMORYVISUALIZER_REPOSITORY_ROOT` to the absolute checkout root; invalid overrides
+fail explicitly. The fixture creates only its owned child's `WithHeap` dump, supplies
 that child's exact trusted offline DAC, drives the actual production main,
 sandboxed preload and React DOM, and removes generated files. Native dialog
 stubs exist only in the test launcher; production has no arbitrary-path test API.
