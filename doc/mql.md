@@ -2,8 +2,11 @@
 
 MQL is data, not Cypher or executable code. This M1 slice of #11 supplies a
 headless F# parser, typed planner and executor over `IndexedHeapSnapshot`.
-It produces rows and address-based drawing **instructions**, not scenes or SVG.
-The CLI uses the shared library. The v1 worker/Electron fake backend is unchanged;
+It produces rows and address-based drawing **instructions**. The shared
+[scene library](scenes.md) consumes these instructions for positioned geometry and
+standalone SVG; MQL itself does not lay out graphics. The native `query` CLI keeps
+its JSON contract, while `export` uses the same library plus the scene pipeline.
+The v1 worker/Electron fake backend is unchanged;
 real IPC binding belongs to #13. Full #11 is not complete: graph/root-path M2
 and worker/CLI real-protocol equivalence remain deferred.
 
@@ -126,8 +129,10 @@ All configured limits must be positive and no greater than these hard ceilings:
 | MaxCandidates          |           1000000 | Actual candidate inspections, shared across statements |
 | MaxElapsedMilliseconds |              5000 | Cooperative elapsed execution time                     |
 
-There is one composition and no scenes, traversal, visited-node or path output
+There is one query composition and no traversal, visited-node or path output
 in M1, so those bounds are not fabricated as inactive configuration knobs.
+Scene construction and SVG writing have their own additional processing/output
+budgets in the [scene contract](scenes.md).
 Input limits fail parsing. Configuration validation is a diagnostic, never a
 silent fallback. Row and directive bounds use one matching-row lookahead:
 exactly reaching the cap with no further match is complete, not truncated.
@@ -188,7 +193,8 @@ an offline memory map, indexes it, compiles MQL and executes this same API.
 Its JSON uses strings for addresses/sizes, includes snapshot identity and
 statuses, and is not the closed worker v1 protocol or a future scene schema.
 CLI extraction has its own existing limits; MQL execution limits begin after
-index creation. This milestone does not claim dump-to-SVG functionality.
+index creation. The `export` command then applies scene and SVG budgets without
+changing the MQL result or `query` JSON schema.
 
 ### Shared API
 

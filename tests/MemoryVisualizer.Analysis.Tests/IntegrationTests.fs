@@ -14,6 +14,7 @@ open MemoryVisualizer.Cli
 open MemoryVisualizer.Core
 open MemoryVisualizer.Core.Analysis
 open MemoryVisualizer.Query
+open MemoryVisualizer.Scene
 open Xunit
 
 type GeneratedDump() =
@@ -380,6 +381,146 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
             QueryCommand.run [| fixture.Path; "--dac"; dac; "--query"; source |] stdout stderr cancellation.Token
 
         Assert.Equal(130, exit)
+
+    [<Fact>]
+    member _.``Real WithHeap offline DAC MQL positioned scene SVG is stable across fresh imports``() =
+        let options = {
+            fixture.Options with
+                IncludeReferences = false
+                IncludeRoots = false
+        }
+
+        let source =
+            "MATCH(s:Segment) RETURN s AS BOX(Background=Grey,Width=32);"
+            + "MATCH(g:Generation) RETURN g AS BOX(Background=Blue,Width=24,Label=g.Generation);"
+            + "MATCH(o:Object) WHERE o.Type=\"MemoryVisualizer.DumpFixture.DuplicatePayload\" RETURN o AS PIN(Background=Red,Label=o.Type,LabelPosition=OuterLeft)"
+
+        let render () =
+            let value =
+                read options None CancellationToken.None
+                |> fun work -> work.GetAwaiter().GetResult() |> snapshot
+
+            let plan =
+                Mql.compile QueryLimits.defaults value.Metadata.Id source
+                |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+
+            use store =
+                IndexedHeapSnapshot.Create(value, SnapshotIndexLimits.defaults, CancellationToken.None)
+                |> Result.defaultWith (fun error -> failwithf "%A" error)
+
+            let result =
+                Mql.execute QueryLimits.defaults plan store (QueryExecutionContext.create CancellationToken.None)
+
+            Assert.Equal(QueryStatus.Complete, result.Status)
+            Assert.False result.SourcePartial
+
+            let built =
+                Scene.build SceneOptions.defaults result (SceneExecutionContext.create CancellationToken.None)
+
+            Assert.Equal(SceneStatus.Complete, built.Status)
+            let scene = built.Scene.Value
+            Assert.Equal(result.Directives.Length, scene.Elements.Length)
+            Assert.Contains(scene.Elements, fun element -> element.Layer = 1)
+            Assert.Contains(scene.Elements, fun element -> element.Layer = 2)
+            Assert.Equal(2, scene.Elements |> List.filter (fun element -> element.Layer = 5) |> List.length)
+            use stream = new MemoryStream()
+
+            Svg.write SvgLimits.defaults scene stream CancellationToken.None
+            |> Result.defaultWith (fun error -> failwithf "%A" error)
+            |> ignore
+
+            scene.SnapshotId, stream.ToArray()
+
+        let firstId, first = render ()
+        let secondId, second = render ()
+        Assert.NotEqual(firstId, secondId)
+        Assert.Equal<byte array>(first, second)
+        let xml = System.Xml.Linq.XDocument.Parse(Text.Encoding.UTF8.GetString first)
+        Assert.Equal("svg", xml.Root.Name.LocalName)
+
+    [<Fact>]
+    member _.``Native CLI export exact caps repeat imports and budget failures have atomic file semantics``() =
+        let source =
+            "MATCH(o:Object) WHERE o.Type=\"MemoryVisualizer.DumpFixture.DuplicatePayload\" RETURN o AS BOX(Label=\"DUPLICATE!\",Background=Blue,Width=24)"
+
+        let dac = fixture.Options.Dac.TrustedPaths[0]
+        let output = Path.Combine(fixture.Directory, "native-export.svg")
+
+        let invoke extras cancellationToken =
+            use stdout = new StringWriter()
+            use stderr = new StringWriter()
+
+            let arguments =
+                Array.append [| fixture.Path; "--dac"; dac; "--query"; source; "--output"; output |] extras
+
+            let code = ExportCommand.run arguments stdout stderr cancellationToken
+            code, stdout.ToString(), stderr.ToString()
+
+        try
+            let exact = [|
+                "--max-results"
+                "2"
+                "--max-directives"
+                "2"
+                "--max-scene-directives"
+                "2"
+                "--max-elements"
+                "2"
+                "--max-lanes"
+                "1"
+                "--max-label-chars"
+                "10"
+                "--max-total-label-chars"
+                "20"
+            |]
+
+            let code, stdout, stderr = invoke exact CancellationToken.None
+            Assert.Equal(0, code)
+            Assert.Equal("", stderr)
+            Assert.Contains("SVG exported", stdout)
+            let first = File.ReadAllBytes output
+            File.Delete output
+
+            let code, _, error =
+                invoke
+                    (Array.append exact [|
+                        "--max-svg-bytes"
+                        first.Length.ToString(Globalization.CultureInfo.InvariantCulture)
+                    |])
+                    CancellationToken.None
+
+            Assert.Equal(0, code)
+            Assert.Equal("", error)
+            Assert.Equal<byte array>(first, File.ReadAllBytes output)
+            File.Delete output
+
+            for extras in
+                [
+                    [| "--max-results"; "1" |]
+                    [| "--max-directives"; "1" |]
+                    [| "--max-scene-directives"; "1" |]
+                    [| "--max-elements"; "1" |]
+                    [| "--max-label-chars"; "9" |]
+                    [| "--max-total-label-chars"; "19" |]
+                    [|
+                        "--max-svg-bytes"
+                        (first.Length - 1).ToString(Globalization.CultureInfo.InvariantCulture)
+                    |]
+                ] do
+                let code, stdout, stderr = invoke extras CancellationToken.None
+                Assert.Equal(3, code)
+                Assert.Equal("", stdout)
+                Assert.NotEmpty stderr
+                Assert.False(File.Exists output)
+                Assert.Empty(Directory.GetFiles(fixture.Directory, ".memoryvisualizer-*.tmp"))
+
+            use cancellation = new CancellationTokenSource()
+            cancellation.Cancel()
+            let code, _, _ = invoke [||] cancellation.Token
+            Assert.Equal(130, code)
+            Assert.False(File.Exists output)
+        finally
+            File.Delete output
 
     [<Fact>]
     member _.``Cycles shared fields array edges weak handles and dependent chains retain semantics``() =

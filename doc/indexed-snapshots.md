@@ -2,8 +2,8 @@
 
 `MemoryVisualizer.Core.IndexedHeapSnapshot` adds read-only selection over the
 materialized `HeapSnapshot` produced by the [native adapter](snapshots.md).
-This is the **provisional visual-first slice of #10**, enabling future real
-memory maps in #12 and desktop import in #13. Managed arrays and indexes are
+This is the **provisional visual-first slice of #10**, enabling real
+[headless memory maps in #12](scenes.md) and future desktop import in #13. Managed arrays and indexes are
 an implementation choice for this slice, **not** a measured backend winner
 or a final ADR. There is no new package, database service, or native dependency.
 The adapter, `inspect` CLI, and fixture-only worker/Electron protocol are unchanged.
