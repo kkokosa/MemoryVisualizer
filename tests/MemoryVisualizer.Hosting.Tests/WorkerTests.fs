@@ -30,15 +30,53 @@ let private cancel id =
     $"{{\"tag\":\"cancel\",\"version\":1,\"requestId\":\"{id}\"}}"
 
 /// A bounded in-memory pipe: runtime tests exercise real incremental reads and backpressure.
-type private TestPipe() =
+type internal TestPipe() =
     inherit Stream()
     let channel = Channel.CreateBounded<byte array>(BoundedChannelOptions(8))
     let mutable current = Array.empty<byte>
     let mutable offset = 0
     let mutable pause: TaskCompletionSource<unit> option = None
     let mutable writeCalls = 0
+    let mutable pauseAfterWrite = Int32.MaxValue
+
+    let writeReturned =
+        TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let readGate = obj ()
+    let mutable readCalls = 0
+    let mutable readWaiter: (int * TaskCompletionSource<unit>) option = None
+    let writeGate = obj ()
+    let mutable writeWaiter: (int * TaskCompletionSource<unit>) option = None
 
     member _.WriteCalls = Volatile.Read(&writeCalls)
+    member _.ReadCalls = Volatile.Read(&readCalls)
+
+    member _.WaitForRead(count) =
+        lock readGate (fun () ->
+            if readCalls >= count then
+                Task.CompletedTask
+            else
+                let completion =
+                    TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+                readWaiter <- Some(count, completion)
+                completion.Task :> Task)
+
+    member _.WaitForWrite(count) =
+        lock writeGate (fun () ->
+            if writeCalls >= count then
+                Task.CompletedTask
+            else
+                let completion =
+                    TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+                writeWaiter <- Some(count, completion)
+                completion.Task :> Task)
+
+    member _.PauseAfterWrite(count) = pauseAfterWrite <- count
+
+    member _.ReleaseWrite() =
+        writeReturned.TrySetResult(()) |> ignore
 
     member _.Complete() = channel.Writer.TryComplete() |> ignore
 
@@ -70,6 +108,13 @@ type private TestPipe() =
         this.WriteAsync(buffer.AsMemory(offset, count), CancellationToken.None).AsTask().GetAwaiter().GetResult()
 
     override _.ReadAsync(buffer: Memory<byte>, cancellation: CancellationToken) =
+        lock readGate (fun () ->
+            readCalls <- readCalls + 1
+
+            match readWaiter with
+            | Some(count, completion) when readCalls >= count -> completion.TrySetResult(()) |> ignore
+            | _ -> ())
+
         ValueTask<int>(
             task {
                 if offset = current.Length then
@@ -88,7 +133,15 @@ type private TestPipe() =
         )
 
     override _.WriteAsync(buffer: ReadOnlyMemory<byte>, cancellation: CancellationToken) =
-        Interlocked.Increment(&writeCalls) |> ignore
+        let call =
+            lock writeGate (fun () ->
+                let count = Interlocked.Increment(&writeCalls)
+
+                match writeWaiter with
+                | Some(expected, completion) when count >= expected -> completion.TrySetResult(()) |> ignore
+                | _ -> ()
+
+                count)
 
         ValueTask(
             task {
@@ -97,11 +150,15 @@ type private TestPipe() =
                 | None -> ()
 
                 do! channel.Writer.WriteAsync(buffer.ToArray(), cancellation).AsTask()
+
+                if call = pauseAfterWrite then
+                    do! writeReturned.Task.WaitAsync(cancellation)
             }
         )
 
     override this.Dispose(disposing) =
         this.Resume()
+        this.ReleaseWrite()
         this.Complete()
         base.Dispose(disposing)
 
@@ -114,6 +171,7 @@ type private Session() =
     member _.Diagnostics = diagnostics.ToString()
     member _.Running = running
     member _.Output = output
+    member _.Input = input
     member _.CloseInput() = input.Complete()
 
     member _.SendMany(frames: string list) =
@@ -360,28 +418,27 @@ let ``Snapshot invalidation cancels previously accepted scoped work`` operation 
     }
 
 [<Fact>]
-let ``Outstanding slots remain occupied until terminal writes complete`` () =
+let ``Visible terminal releases admission before its blocked write completion`` () =
     task {
         use session = new Session()
         do! session.Start()
-        session.Output.Pause()
+        session.Output.PauseAfterWrite(session.Output.WriteCalls + 8)
         do! session.SendMany [ for id in 1..8 -> request (string id) "" "capabilities" "{}" ]
-        do! Task.Delay(100)
-        do! session.Send(request "9" "" "capabilities" "{}")
-        do! Task.Delay(50)
-        session.Output.Resume()
-        let mutable busy = false
-        let ids = HashSet<string>()
 
-        for _ in 1..9 do
+        for _ in 1..8 do
             let! frame = session.Terminal()
-            Assert.True(ids.Add(stringProperty "requestId" frame))
+            Assert.Equal("success", tag frame)
 
-            if stringProperty "requestId" frame = "9" then
-                Assert.Equal("Busy", frame |> property "error" |> stringProperty "code")
-                busy <- true
+        let nextRead = session.Input.ReadCalls + 1
+        do! session.SendMany [ for id in 9..16 -> request (string id) "" "capabilities" "{}" ]
+        // This barrier proves the complete burst was admitted while the last previous write is blocked.
+        do! session.Input.WaitForRead(nextRead).WaitAsync(TimeSpan.FromSeconds(1.0))
+        session.Output.ReleaseWrite()
 
-        Assert.True(busy)
+        for _ in 9..16 do
+            let! frame = session.Terminal()
+            Assert.Equal("success", tag frame)
+
         do! session.Stop()
     }
 

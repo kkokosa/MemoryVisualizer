@@ -4,9 +4,9 @@ The F# adapter uses pinned ClrMD **4.1.745802** on the repository's exact .NET 1
 RC1 SDK. It accepts a dump filename, never a PID. `IHeapSnapshotReader` extends
 the unchanged `ISnapshotReader` metadata interface without forcing existing
 implementations to implement the new method. The CLI `inspect` is the initial
-real native entry point. Worker v1 remains explicitly fake; production IPC
-integration requires selected-file handles, real capabilities/error mappings,
-and a suitable import watchdog, not reuse of its synthetic ten-second deadline.
+real native entry point. Worker v1 remains explicitly fake. The [desktop native v2 host](desktop-workspace.md)
+adds main-selected paths, explicit capabilities/error mappings and an external
+120-second import watchdog rather than reusing v1's synthetic ten-second deadline.
 
 ## Local/offline and native library trust
 

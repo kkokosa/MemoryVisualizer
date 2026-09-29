@@ -9,8 +9,9 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- SDK-bundled FSharp.Core has OS-specific hashes; use the canonical NuGet package. -->
     <DisableImplicitLibraryPacksFolder>true</DisableImplicitLibraryPacksFolder>
-    <BaseOutputPath>$(MSBuildThisFileDirectory)bin/$(MSBuildProjectName)/</BaseOutputPath>
-    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <MemoryVisualizerBuildRoot Condition="'$(MemoryVisualizerBuildRoot)' == ''">$(MSBuildThisFileDirectory)</MemoryVisualizerBuildRoot>
+    <BaseOutputPath>$(MemoryVisualizerBuildRoot)bin/$(MSBuildProjectName)/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MemoryVisualizerBuildRoot)obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>

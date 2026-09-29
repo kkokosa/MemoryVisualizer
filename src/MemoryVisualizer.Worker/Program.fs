@@ -6,6 +6,10 @@ open MemoryVisualizer.Hosting
 [<EntryPoint>]
 let main arguments =
     match arguments with
+    | [| "--protocol"; "--backend=native" |]
+    | [| "--backend=native"; "--protocol" |] ->
+        NativeWorker.runAsync (Console.OpenStandardInput()) (Console.OpenStandardOutput()) Console.Error
+        |> fun running -> running.GetAwaiter().GetResult()
     | [| "--protocol"; "--backend=fake" |]
     | [| "--backend=fake"; "--protocol" |] ->
         Worker.runAsync (Console.OpenStandardInput()) (Console.OpenStandardOutput()) Console.Error

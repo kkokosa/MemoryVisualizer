@@ -6,6 +6,8 @@
 **/TestResults/
 **/node_modules/
 **/dist/
+**/renderer-dist/
+/artifacts/
 **/coverage/
 *.user
 *.suo

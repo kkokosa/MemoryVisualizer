@@ -2,9 +2,10 @@
 
 The visual-first slice of #12 turns a supported dump plus bounded MQL into
 editable, standalone vector SVG. `MemoryVisualizer.Scene` references Query/Core,
-not ClrMD, a browser, or Electron. **Full #12 remains open**: desktop real import,
-interactive rendering, selection and the first illustration through both hosts
-require #13. Worker protocol v1 and its explicit fake backend are unchanged.
+not ClrMD, a browser, or Electron. The [M1 desktop workspace](desktop-workspace.md)
+consumes these exact positions through native protocol v2 for interactive
+rendering, selection and shared-engine export. Platform acceptance is verified
+through #13. Worker protocol v1 and its explicit fake backend are unchanged.
 This scene version is not an unversioned addition to that closed IPC protocol.
 
 ## Architecture decision: one positioned scene

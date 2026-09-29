@@ -4,12 +4,16 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../MemoryVisualizer.Analysis.ClrMd/MemoryVisualizer.Analysis.ClrMd.fsproj" />
+    <ProjectReference Include="../MemoryVisualizer.Scene/MemoryVisualizer.Scene.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../Shared/CommandLine.fs" Link="CommandLine.fs" />
     <Compile Include="Protocol.fs" />
+    <Compile Include="NativeProtocol.fs" />
     <Compile Include="Transport.fs" />
     <Compile Include="Worker.fs" />
+    <Compile Include="NativeJson.fs" />
+    <Compile Include="NativeWorker.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 </Project>

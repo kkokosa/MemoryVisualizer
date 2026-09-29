@@ -13,9 +13,11 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces",
     "build:desktop": "npm run build --workspace=@memoryvisualizer/desktop",
+    "build:workspace": "node scripts/build-workspace.mjs",
     "test:protocol": "npm run build:desktop && npm test --workspace=@memoryvisualizer/desktop",
     "electron:install": "node scripts/install-electron.mjs",
     "test:electron": "node scripts/electron-test.mjs",
+    "test:bundle": "node --test scripts/bundle-links.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "smoke": "node scripts/smoke.mjs"

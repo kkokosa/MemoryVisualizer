@@ -11,6 +11,17 @@ import {
 const MAX_DEPTH = 16;
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const encoder = new TextEncoder();
+const sceneNumbers = new Set([
+  "x",
+  "y",
+  "width",
+  "height",
+  "baseline",
+  "cellWidth",
+  "fontSize",
+  "lineHeight",
+  "strokeWidth",
+]);
 
 function invalid(): never {
   throw new ProtocolError("InvalidFrame", "Invalid protocol frame.");
@@ -21,7 +32,10 @@ function invalid(): never {
 class JsonScanner {
   private offset = 0;
 
-  constructor(private readonly input: string) {}
+  constructor(
+    private readonly input: string,
+    private readonly nativeNumbers = false,
+  ) {}
 
   validate(): void {
     this.whitespace();
@@ -52,7 +66,7 @@ class JsonScanner {
     return invalid();
   }
 
-  private value(depth: number): void {
+  private value(depth: number, key?: string): void {
     this.whitespace();
     const character = this.input[this.offset];
     if (character === "{" || character === "[") {
@@ -65,9 +79,19 @@ class JsonScanner {
       return;
     }
     const remaining = this.input.slice(this.offset);
-    const literal = /^(?:true|false|null|0|[1-9][0-9]*)/.exec(remaining);
+    const floating = this.nativeNumbers && key !== undefined && sceneNumbers.has(key);
+    const literal = (
+      floating
+        ? /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/
+        : /^(?:true|false|null|0|[1-9][0-9]*)/
+    ).exec(remaining);
     if (literal === null) invalid();
-    if (/^[0-9]/.test(literal[0]) && !Number.isSafeInteger(Number(literal[0]))) {
+    if (
+      /^[-0-9]/.test(literal[0]) &&
+      (floating
+        ? !Number.isFinite(Number(literal[0])) || Object.is(Number(literal[0]), -0)
+        : !Number.isSafeInteger(Number(literal[0])))
+    ) {
       invalid();
     }
     this.offset += literal[0].length;
@@ -84,14 +108,15 @@ class JsonScanner {
     }
     for (;;) {
       this.whitespace();
+      let key: string | undefined;
       if (open === "{") {
-        const key = this.string();
+        key = this.string();
         if (keys.has(key)) invalid();
         keys.add(key);
         this.whitespace();
         if (this.input[this.offset++] !== ":") invalid();
       }
-      this.value(depth);
+      this.value(depth, key);
       this.whitespace();
       const separator = this.input[this.offset++];
       if (separator === close) return;
@@ -100,7 +125,7 @@ class JsonScanner {
   }
 }
 
-export function decodeFrame(bytes: Uint8Array): unknown {
+export function decodeFrame(bytes: Uint8Array, nativeNumbers = false): unknown {
   if (
     bytes.length === 0 ||
     bytes.length > LIMITS.maxFrameBytes ||
@@ -111,26 +136,33 @@ export function decodeFrame(bytes: Uint8Array): unknown {
   }
   try {
     const input = utf8.decode(bytes);
-    new JsonScanner(input).validate();
+    new JsonScanner(input, nativeNumbers).validate();
     return JSON.parse(input) as unknown;
   } catch {
     return invalid();
   }
 }
 
-export function encodeFrame(value: Inbound | Outbound): Uint8Array {
-  switch (value.tag) {
-    case "hello":
-    case "request":
-    case "cancel":
-    case "shutdown":
-      parseInbound(value);
-      break;
-    default:
-      parseOutbound(value);
+export function encodeFrame(value: Inbound | Outbound): Uint8Array;
+export function encodeFrame<T>(value: T, validate: (input: unknown) => T): Uint8Array;
+export function encodeFrame(value: unknown, validate?: (input: unknown) => unknown): Uint8Array {
+  if (validate) {
+    validate(value);
+  } else {
+    if (value === null || typeof value !== "object" || !("tag" in value)) invalid();
+    switch (value.tag) {
+      case "hello":
+      case "request":
+      case "cancel":
+      case "shutdown":
+        parseInbound(value);
+        break;
+      default:
+        parseOutbound(value);
+    }
   }
   const bytes = encoder.encode(JSON.stringify(value));
-  decodeFrame(bytes);
+  decodeFrame(bytes, validate !== undefined);
   const frame = new Uint8Array(bytes.length + 1);
   frame.set(bytes);
   frame[bytes.length] = 10;
@@ -142,6 +174,8 @@ export class FrameDecoder {
   private length = 0;
   private ended = false;
   private failed = false;
+
+  constructor(private readonly nativeNumbers = false) {}
 
   push(chunk: Uint8Array): unknown[] {
     if (this.ended || this.failed) return invalid();
@@ -156,12 +190,12 @@ export class FrameDecoder {
           invalid();
         }
         if (newline !== -1 && this.length === 0) {
-          frames.push(decodeFrame(part));
+          frames.push(decodeFrame(part, this.nativeNumbers));
         } else {
           this.pending.set(part, this.length);
           this.length += part.length;
           if (newline !== -1) {
-            frames.push(decodeFrame(this.pending.subarray(0, this.length)));
+            frames.push(decodeFrame(this.pending.subarray(0, this.length), this.nativeNumbers));
             this.length = 0;
           }
         }

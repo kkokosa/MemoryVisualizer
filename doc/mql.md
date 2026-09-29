@@ -6,9 +6,9 @@ It produces rows and address-based drawing **instructions**. The shared
 [scene library](scenes.md) consumes these instructions for positioned geometry and
 standalone SVG; MQL itself does not lay out graphics. The native `query` CLI keeps
 its JSON contract, while `export` uses the same library plus the scene pipeline.
-The v1 worker/Electron fake backend is unchanged;
-real IPC binding belongs to #13. Full #11 is not complete: graph/root-path M2
-and worker/CLI real-protocol equivalence remain deferred.
+The v1 worker fake backend is unchanged; the [native v2 desktop bridge](desktop-workspace.md)
+uses this same preparation/execution API with bounded pages. Full #11 is not
+complete: graph/root-path M2 remains deferred.
 
 ## Grammar and capability matrix
 
