@@ -310,12 +310,7 @@ module Worker =
             if failure.Task.IsCompleted then
                 let code = failure.Task.Result
                 // Best effort is itself bounded; an uncooperative stream cannot keep the process alive.
-                use fatalDeadline = new CancellationTokenSource(200)
-
-                try
-                    do! writer.WriteAsync(Protocol.fatal code, fatalDeadline.Token)
-                with _ ->
-                    ()
+                do! writer.WriteFatalAsync(fun () -> Protocol.fatal code)
                 // Diagnostics are fixed strings, and are not allowed to block cleanup either.
                 try
                     let writing =

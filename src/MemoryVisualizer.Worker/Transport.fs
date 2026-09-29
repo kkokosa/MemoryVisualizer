@@ -98,3 +98,17 @@ type FrameWriter(output: Stream, timeout: TimeSpan, ?validate: byte array -> uni
                 if entered then
                     semaphore.Release() |> ignore
         }
+
+    member internal this.WriteFatalAsync(encode: unit -> byte array, ?startDeadline: unit -> CancellationTokenSource) =
+        task {
+            try
+                // Cold serializer initialization must not consume the bounded pipe-write budget.
+                let bytes = encode ()
+
+                use deadline =
+                    (defaultArg startDeadline (fun () -> new CancellationTokenSource(200))) ()
+
+                do! this.WriteAsync(bytes, deadline.Token)
+            with _ ->
+                ()
+        }

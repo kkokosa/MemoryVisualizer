@@ -762,12 +762,7 @@ module NativeWorker =
                 query <- None)
 
             if failure.Task.IsCompleted then
-                use deadline = new CancellationTokenSource(200)
-
-                try
-                    do! writer.WriteAsync(NativeProtocol.fatal failure.Task.Result, deadline.Token)
-                with _ ->
-                    ()
+                do! writer.WriteFatalAsync(fun () -> NativeProtocol.fatal failure.Task.Result)
 
                 try
                     let writing =

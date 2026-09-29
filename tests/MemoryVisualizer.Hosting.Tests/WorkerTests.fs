@@ -674,3 +674,41 @@ let ``Diagnostic backpressure cannot prevent fatal cleanup`` () =
         finally
             release.Set()
     }
+
+[<Theory>]
+[<InlineData(1)>]
+[<InlineData(2)>]
+let ``Fatal encoding cannot consume the transport publication deadline`` version =
+    task {
+        use output = new MemoryStream()
+
+        let encodeFrame, validate =
+            if version = 1 then
+                Protocol.fatal, Protocol.validateOutbound
+            else
+                NativeProtocol.fatal, NativeProtocol.validateOutbound
+
+        let writer = FrameWriter(output, TimeSpan.FromSeconds(2.0), validate)
+        let mutable activeDeadline: CancellationTokenSource option = None
+
+        let startDeadline () =
+            let deadline = new CancellationTokenSource()
+            activeDeadline <- Some deadline
+            deadline
+
+        let encode () =
+            // Model preparation outlasting any already-started I/O budget without a timing race.
+            activeDeadline |> Option.iter (fun deadline -> deadline.Cancel())
+            encodeFrame "InvalidFrame"
+
+        do! (writer.WriteFatalAsync(encode, startDeadline)).WaitAsync(TimeSpan.FromSeconds(5.0))
+
+        let bytes = output.ToArray()
+        Assert.NotEmpty(bytes)
+        Assert.Equal(10uy, bytes[bytes.Length - 1])
+        let frame = bytes[0 .. bytes.Length - 2]
+        validate frame
+        use document = JsonDocument.Parse(ReadOnlyMemory<byte>(frame))
+        Assert.Equal("fatal", tag document.RootElement)
+        Assert.Equal("InvalidFrame", stringProperty "code" document.RootElement)
+    }
