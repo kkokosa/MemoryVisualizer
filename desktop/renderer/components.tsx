@@ -3,10 +3,18 @@ import type { Bounds, Diagnostic, SceneElement, SceneInfo } from "../src/native-
 import {
   diagnosticRange,
   fittedBounds,
+  elementBounds,
+  hasPinLabels,
   highlightQuery,
+  initialBounds,
+  readableBounds,
+  resizedBounds,
+  revealBounds,
+  viewScale,
   textareaDiagnosticRange,
   zoomBounds,
   type SettingsDraft,
+  type ViewportSize,
 } from "./model.js";
 import { createSceneSvg } from "./scene-renderer.js";
 
@@ -173,10 +181,26 @@ export function Diagram({
 }) {
   const host = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement | null>(null);
-  const callbacks = useRef({ onSelect, onHover });
-  callbacks.current = { onSelect, onHover };
+  const callbacks = useRef({ onSelect, onHover, onFocus: (_id: string) => {} });
   const initial = fittedBounds(scene.bounds);
   const [view, setView] = useState<Bounds>(initial);
+  const viewportSize = useRef<ViewportSize | null>(null);
+  const cameraMode = useRef<"fit" | "readable" | "custom">("fit");
+  const reveal = (id: string) => {
+    const element = elements.find((element) => element.id === id);
+    if (element) {
+      cameraMode.current = "custom";
+      setView((current) => {
+        const entire = elementBounds(element);
+        const target =
+          element.text && (entire.width > current.width - 32 || entire.height > current.height - 32)
+            ? element.text.bounds
+            : entire;
+        return revealBounds(current, target);
+      });
+    }
+  };
+  callbacks.current = { onSelect, onHover, onFocus: reveal };
   const drag = useRef<{ x: number; y: number; view: Bounds; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   useEffect(() => {
@@ -186,6 +210,7 @@ export function Diagram({
         if (!suppressClick.current) callbacks.current.onSelect(id);
       },
       onHover: (id) => callbacks.current.onHover(id),
+      onFocus: (id) => callbacks.current.onFocus(id),
     });
     svg.current = element;
     host.current?.replaceChildren(element);
@@ -195,13 +220,39 @@ export function Diagram({
     };
   }, [scene, elements, hiddenLayers]);
   useEffect(() => {
-    setView(fittedBounds(scene.bounds));
-  }, [scene]);
+    const viewport = host.current?.parentElement;
+    if (!viewport) return;
+    let initialized = false;
+    const measure = () => {
+      const { width, height } = viewport.getBoundingClientRect();
+      if (!(width > 0 && height > 0)) return;
+      const next = { width, height };
+      const previous = viewportSize.current;
+      viewportSize.current = next;
+      if (!initialized) {
+        initialized = true;
+        cameraMode.current =
+          hasPinLabels(elements) && Math.min(width / initial.width, height / initial.height) < 1
+            ? "readable"
+            : "fit";
+        setView(initialBounds(scene.bounds, elements, next));
+      } else if (cameraMode.current === "fit") {
+        setView(fittedBounds(scene.bounds));
+      } else if (previous && (previous.width !== width || previous.height !== height)) {
+        setView((current) => resizedBounds(current, previous, next));
+      }
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    measure();
+    return () => observer.disconnect();
+  }, [scene, elements]);
   useEffect(() => {
     const viewport = host.current?.parentElement;
     if (!viewport) return;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
+      cameraMode.current = "custom";
       setView((current) =>
         zoomBounds(current, event.deltaY > 0 ? 1.12 : 1 / 1.12, fittedBounds(scene.bounds)),
       );
@@ -218,13 +269,27 @@ export function Diagram({
       group.setAttribute("data-selected", String(selected));
       group.setAttribute("aria-pressed", String(selected));
     }
+    if (selectedId) callbacks.current.onFocus(selectedId);
   }, [selectedId, scene, elements, hiddenLayers]);
-  const zoom = (factor: number) => setView((current) => zoomBounds(current, factor, initial));
+  const zoom = (factor: number) => {
+    cameraMode.current = "custom";
+    setView((current) => zoomBounds(current, factor, initial));
+  };
+  const fit = () => {
+    cameraMode.current = "fit";
+    setView(initial);
+  };
+  const readLabels = () => {
+    if (!viewportSize.current || !hasPinLabels(elements)) return;
+    cameraMode.current = "readable";
+    setView(readableBounds(scene.bounds, elements, viewportSize.current));
+  };
   const keyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     const delta = event.shiftKey ? 0.25 : 0.08;
     if (event.key === "+" || event.key === "=") zoom(0.8);
     else if (event.key === "-") zoom(1.25);
-    else if (event.key === "0" || event.key.toLowerCase() === "f") setView(initial);
+    else if (event.key === "0" || event.key.toLowerCase() === "f") fit();
+    else if (event.key.toLowerCase() === "r") readLabels();
     else if (event.key === "ArrowLeft") setView((v) => ({ ...v, x: v.x - v.width * delta }));
     else if (event.key === "ArrowRight") setView((v) => ({ ...v, x: v.x + v.width * delta }));
     else if (event.key === "ArrowUp") setView((v) => ({ ...v, y: v.y - v.height * delta }));
@@ -236,6 +301,7 @@ export function Diagram({
         visible[(index + (event.key === "]" ? 1 : -1) + visible.length) % visible.length];
       if (next) onSelect(next.id);
     } else return;
+    if (event.key.startsWith("Arrow")) cameraMode.current = "custom";
     event.preventDefault();
   };
   const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -252,21 +318,22 @@ export function Diagram({
         <button onClick={() => zoom(1.25)} aria-label="Zoom out">
           −
         </button>
-        <button onClick={() => setView(initial)}>Fit scene</button>
-        <span className="muted">{Math.round((initial.width / view.width) * 100)}%</span>
+        <button onClick={fit}>Fit scene</button>
+        {hasPinLabels(elements) && <button onClick={readLabels}>Readable labels</button>}
+        <span className="muted">
+          {viewportSize.current
+            ? Math.round(
+                (viewScale(view, viewportSize.current) / viewScale(initial, viewportSize.current)) *
+                  100,
+              )
+            : 100}
+          %
+        </span>
         <span className="hint">Drag to pan · + / − zoom · F fit · [ / ] select</span>
       </div>
-      <p className="diagram-scale" data-testid="address-layout-note">
-        {scene.redaction.addresses
-          ? "Schematic view: address positions and byte sizes are hidden."
-          : scene.layout === "compact"
-            ? scene.gaps
-              ? `Compact overview: ${scene.gaps.offsets.length} empty address gaps compressed. // marks breaks in the address scale.`
-              : "Compact overview: no empty gaps between the selected ranges."
-            : "Linear address scale: empty address gaps keep their full size."}
-      </p>
       <div
         className="diagram-viewport"
+        style={{ backgroundColor: scene.theme.background }}
         data-testid="memory-diagram"
         tabIndex={0}
         role="region"
@@ -281,6 +348,7 @@ export function Diagram({
           const dy = event.clientY - start.y;
           if (Math.abs(dx) + Math.abs(dy) < 4 && !start.moved) return;
           start.moved = true;
+          cameraMode.current = "custom";
           suppressClick.current = true;
           event.currentTarget.setPointerCapture(event.pointerId);
           const rect = svg.current?.getBoundingClientRect();
@@ -311,8 +379,9 @@ export function Diagram({
         )}
       </div>
       <p id="diagram-keyboard-help" className="sr-only">
-        Arrow keys pan. Plus and minus zoom. F or zero fits the scene. Brackets select previous or
-        next visible element. Tab focuses elements; Enter or Space selects one.
+        Arrow keys pan. Plus and minus zoom. F or zero fits the scene. R restores readable pin
+        labels. Brackets select previous or next visible element. Tab focuses elements; Enter or
+        Space selects one.
       </p>
     </div>
   );
@@ -366,13 +435,13 @@ export function Settings({
             if (layout === "compact" || layout === "linear") onChange({ ...draft, layout });
           }}
         >
-          <option value="compact">Compact overview (compress empty gaps)</option>
+          <option value="compact">Compact overview</option>
           <option value="linear">Linear (true address spacing)</option>
         </select>
       </label>
       <p className="hint" id="layout-help">
-        Compact preserves byte proportions within occupied ranges and marks omitted gaps. Linear
-        preserves address distances. Run again after changing layout.
+        Compact omits gaps between selected ranges; Linear preserves address distances. Run again
+        after changing layout.
       </p>
       {field("plotWidth", "Plot width (scene units)", 64, 4096)}
       <div className="field-pair">

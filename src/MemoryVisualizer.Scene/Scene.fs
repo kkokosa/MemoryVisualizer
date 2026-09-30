@@ -237,6 +237,144 @@ module Scene =
                 Offsets = List.ofSeq offsets
             }
 
+    let private translateElement dy (element: SceneElement) =
+        if dy = 0.0 then
+            element
+        else
+            let bounds = {
+                element.Bounds with
+                    Y = element.Bounds.Y + dy
+            }
+
+            {
+                element with
+                    Bounds = bounds
+                    Geometry =
+                        match element.Geometry with
+                        | SceneGeometry.Rectangle _ -> SceneGeometry.Rectangle bounds
+                        | SceneGeometry.Line(first, last) ->
+                            SceneGeometry.Line({ first with Y = first.Y + dy }, { last with Y = last.Y + dy })
+                    Text =
+                        element.Text
+                        |> Option.map (fun text -> {
+                            text with
+                                Bounds = {
+                                    text.Bounds with
+                                        Y = text.Bounds.Y + dy
+                                }
+                                Lines =
+                                    text.Lines
+                                    |> List.map (fun line -> {
+                                        line with
+                                            Baseline = line.Baseline + dy
+                                    })
+                        })
+            }
+
+    let private packPinRows
+        guard
+        (admitted: ResizeArray<DrawingDirective * bigint * bigint>)
+        (lanes: ResizeArray<SceneLane>)
+        (elements: ResizeArray<SceneElement>)
+        =
+        let members = Dictionary<string, ResizeArray<int>>()
+
+        for index in 0 .. elements.Count - 1 do
+            guard ()
+            let lane = elements[index].LaneId
+
+            match members.TryGetValue lane with
+            | true, indices -> indices.Add index
+            | _ -> members.Add(lane, ResizeArray [ index ])
+
+        let mutable shift = 0.0
+
+        for laneIndex in 0 .. lanes.Count - 1 do
+            guard ()
+            let original = lanes[laneIndex]
+
+            let lane = {
+                original with
+                    Bounds = {
+                        original.Bounds with
+                            Y = original.Bounds.Y + shift
+                    }
+            }
+
+            let contentHeight = lane.Bounds.Height - 80.0
+            let candidates = ResizeArray<float * float * int>()
+            let mutable rowHeight = 0.0
+            let mutable hasBaseElements = false
+            let mutable baseBottom = lane.Bounds.Y + 40.0 + contentHeight
+
+            for index in members[lane.Id] do
+                guard ()
+                let element = translateElement shift elements[index]
+                elements[index] <- element
+                let directive, _, _ = admitted[index]
+
+                match directive.Kind, directive.LabelPosition, element.Text with
+                | DrawingKind.Pin, LabelPosition.OuterLeft, Some text ->
+                    let left = min text.Bounds.X (element.Bounds.X - element.Style.StrokeWidth / 2.0)
+
+                    let right =
+                        max (text.Bounds.X + text.Bounds.Width) (element.Bounds.X + element.Style.StrokeWidth / 2.0)
+
+                    candidates.Add(left, right, index)
+                    rowHeight <- max rowHeight (max element.Bounds.Height text.Bounds.Height)
+                | _ ->
+                    hasBaseElements <- true
+
+                    baseBottom <-
+                        max baseBottom (element.Bounds.Y + element.Bounds.Height + element.Style.StrokeWidth / 2.0)
+
+                    element.Text
+                    |> Option.iter (fun text -> baseBottom <- max baseBottom (text.Bounds.Y + text.Bounds.Height))
+
+            let mutable height = lane.Bounds.Height
+
+            if candidates.Count > 0 then
+                guard ()
+                // Sort interval starts, not pin addresses: label lengths can reverse their order.
+                let sorted =
+                    candidates |> Seq.sortBy (fun (left, _, index) -> left, index) |> Seq.toArray
+
+                guard ()
+                let rows = PriorityQueue<int, struct (float * int)>()
+
+                let firstRow =
+                    if hasBaseElements then
+                        baseBottom + 8.0
+                    else
+                        lane.Bounds.Y + 40.0 + (contentHeight - rowHeight) / 2.0
+
+                for left, right, index in sorted do
+                    guard ()
+
+                    let row =
+                        match rows.TryPeek() with
+                        | true, _, struct (finish, _) when finish + 8.0 <= left -> rows.Dequeue()
+                        | _ -> rows.Count
+
+                    rows.Enqueue(row, struct (right, row))
+                    let element = elements[index]
+                    let center = firstRow + float row * (rowHeight + 8.0) + rowHeight / 2.0
+
+                    elements[index] <-
+                        translateElement (center - element.Bounds.Y - element.Bounds.Height / 2.0) element
+
+                let bottom = firstRow + float (rows.Count - 1) * (rowHeight + 8.0) + rowHeight
+                height <- max height (bottom - lane.Bounds.Y + 40.0)
+
+            lanes[laneIndex] <- {
+                lane with
+                    Bounds = { lane.Bounds with Height = height }
+            }
+
+            shift <- shift + height - original.Bounds.Height
+
+        guard ()
+
     let build options (result: QueryResult) (context: SceneExecutionContext) =
         let mutable status = SceneStatus.Complete
         let mutable scene = None
@@ -278,6 +416,8 @@ module Scene =
                     >= float options.Limits.MaxElapsedMilliseconds
                 then
                     raise (SceneStopped SceneTruncation.ElapsedTime)
+
+                context.CancellationToken.ThrowIfCancellationRequested()
 
             guard ()
 
@@ -433,7 +573,7 @@ module Scene =
 
                 let lanes = ResizeArray<SceneLane>()
                 let laneInfo = Dictionary<struct (int * int), SceneLane * float>()
-                let laneTop = if compact.IsSome then 48.0 else 16.0
+                let laneTop = if compact.IsSome then 32.0 else 16.0
                 let mutable top = laneTop
 
                 for pair in laneHeights do
@@ -665,6 +805,13 @@ module Scene =
 
                 guard ()
 
+                if not options.Redaction.Addresses then
+                    packPinRows guard admitted lanes elements
+
+                    if lanes.Count > 0 then
+                        let last = lanes[lanes.Count - 1].Bounds
+                        top <- last.Y + last.Height + 16.0
+
                 let width =
                     if options.Redaction.Addresses && laneOrdinals.Count > 0 then
                         max plotWidth (float (laneOrdinals.Values |> Seq.max) * 24.0)
@@ -682,7 +829,9 @@ module Scene =
                 let gaps =
                     compact
                     |> Option.map (fun layout ->
-                        let legend = "Compressed address gaps; not linear distance."
+                        let legend =
+                            "Compressed gaps contain no selected ranges; not necessarily free or unmapped memory. Horizontal distance is not linear."
+
                         let legendWidth = float legend.Length * 8.0
 
                         {
@@ -694,8 +843,8 @@ module Scene =
                                 Height = top - 16.0 - laneTop
                             }
                             Lines = [
-                                ({ X = layout.GapWidth * 0.25; Y = 44.0 }, { X = layout.GapWidth * 0.5; Y = 36.0 })
-                                ({ X = layout.GapWidth * 0.5; Y = 44.0 }, { X = layout.GapWidth * 0.75; Y = 36.0 })
+                                ({ X = layout.GapWidth * 0.25; Y = 28.0 }, { X = layout.GapWidth * 0.5; Y = 20.0 })
+                                ({ X = layout.GapWidth * 0.5; Y = 28.0 }, { X = layout.GapWidth * 0.75; Y = 20.0 })
                             ]
                             Style = {
                                 Fill = "#fff1cc"
@@ -730,11 +879,6 @@ module Scene =
                     elements
                     |> Seq.choose _.Text
                     |> Seq.fold (fun right text -> max right (text.Bounds.X + text.Bounds.Width)) (plotX + width)
-
-                let contentRight =
-                    match gaps with
-                    | Some markers -> max contentRight (markers.Legend.Bounds.X + markers.Legend.Bounds.Width)
-                    | None -> contentRight
 
                 status <-
                     if reasons.Count = 0 then

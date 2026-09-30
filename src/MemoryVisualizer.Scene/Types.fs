@@ -43,7 +43,7 @@ type SceneText = {
     IsTruncated: bool
 }
 
-/// One positioned glyph, repeated with x translations; the legend is global.
+/// One positioned glyph repeated with x translations; Legend supplies accessible description text, not paint.
 type SceneGapMarkers = {
     Offsets: float list
     Band: SceneBounds

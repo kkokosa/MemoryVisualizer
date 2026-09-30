@@ -71,13 +71,29 @@ bundled worker.
 New workspaces default to **Compact overview** in **Address layout**. The shared
 engine fits occupied memory to the address axis while replacing empty gaps with
 marked breaks. Blue segments and grey generations therefore remain visible when
-a distant frozen segment would otherwise consume most of the linear address
+a distant frozen extent would otherwise consume most of the linear address
 span. Overlapping ranges stay aligned and occupied byte-length proportions are
 preserved; distances across a break are **not** linear address distances.
 Choose **Linear (true address spacing)** and Run to inspect the original address
 scale. Fit adjusts the camera; it does not change either mapping. Very small
 objects may still need a focused viewport. MQL `Width` controls a box's vertical
-thickness, not its address extent.
+thickness, not its address extent. Breaks indicate intervals absent from the
+selected ranges, not necessarily free or unmapped memory. `Segment` is the
+compatible ClrMD/MQL name for GC regions as well as traditional segments.
+
+Runtime/heap lanes are layout groups, not extra memory regions, and no enclosing
+border is drawn around them. The canvas matches the shared scene's white default
+background. Compact break marks remain; their description is accessible without
+repeating captions over the drawing.
+
+OuterLeft pin labels use deterministic separate rows in the shared engine.
+Pins retain their exact horizontal address positions and source identities;
+neither labels nor objects are silently dropped. Dense labeled-pin scenes start
+at readable scale, with pan/zoom to explore the remaining rows. **Readable
+labels** (R) restores that view; **Fit scene** (F) deliberately shows the entire
+scene, which can make a very large diagram's text small. Resizing panes preserves
+readable zoom, and keyboard focus/selection brings the target into view. Narrow
+the query or explicit address viewport for smaller illustrations.
 
 The panes have keyboard-adjustable splitters. Native menus expose Open Dump
 (`Ctrl/Cmd+O`), Open Recipe (`Ctrl/Cmd+Shift+O`), Save Recipe

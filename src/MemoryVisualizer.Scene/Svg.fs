@@ -182,6 +182,10 @@ module Svg =
                 attr "data-redact-strings" (boolean scene.Redaction.Strings)
                 attr "data-redact-paths" (boolean scene.Redaction.Paths)
                 attr "data-redact-labels" (boolean scene.Redaction.Labels)
+
+                if scene.Gaps.IsSome && not scene.Redaction.Addresses then
+                    attr "aria-describedby" "address-layout-description"
+
                 start "rect"
                 rect scene.Bounds
                 attr "fill" scene.Theme.Background
@@ -212,19 +216,18 @@ module Svg =
 
                         finish ()
 
-                    text "address-layout-legend" markers.Legend)
+                    start "desc"
+                    attr "id" "address-layout-description"
+                    xml.WriteString(markers.Legend.Lines |> List.map _.Text |> String.concat " ")
+                    finish ())
 
                 for lane in scene.Lanes do
                     token.ThrowIfCancellationRequested()
-                    start "rect"
+                    start "g"
                     attr "id" lane.Id
                     attr "data-kind" "lane"
                     lane.Runtime |> Option.iter (integer >> attr "data-runtime")
                     lane.Heap |> Option.iter (integer >> attr "data-heap")
-                    rect lane.Bounds
-                    attr "fill" "none"
-                    attr "stroke" scene.Theme.Stroke
-                    attr "stroke-width" "1"
                     finish ()
 
                 for element in scene.Elements do

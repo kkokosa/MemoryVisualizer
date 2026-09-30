@@ -555,18 +555,11 @@ code {
   font-size: 9px;
   text-align: right;
 }
-.diagram-scale {
-  margin: 0;
-  padding: 7px 11px;
-  background: #eff2f5;
-  color: #28374a;
-  font-size: 11px;
-}
 .diagram-viewport {
   position: relative;
   flex: 1;
   overflow: hidden;
-  background: #eff2f5;
+  background: #ffffff;
   color: #28374a;
   min-height: 220px;
   touch-action: none;

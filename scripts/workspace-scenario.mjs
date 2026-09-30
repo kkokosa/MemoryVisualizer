@@ -16,6 +16,7 @@ const recipePath = join(folder, "workspace.mvrecipe");
 const svgPath = join(folder, "scene.svg");
 const workers = [];
 const queryResults = [];
+let sceneElements = [];
 const handle = ipcMain.handle.bind(ipcMain);
 let commitBarrier = null;
 ipcMain.handle = (channel, listener) =>
@@ -51,8 +52,14 @@ childProcess.spawn = function (file, args, options) {
         const frame = JSON.parse(buffer.slice(0, end));
         buffer = buffer.slice(end + 1);
         if (frame.tag === "ready") record.ready = true;
-        if (frame.tag === "success" && frame.result.tag === "query")
+        if (frame.tag === "success" && frame.result.tag === "query") {
           queryResults.push(frame.result);
+          sceneElements = [];
+        }
+        if (frame.tag === "success" && frame.result.tag === "elements") {
+          sceneElements.push(...frame.result.items);
+          assert.ok(sceneElements.length <= 1024);
+        }
       }
       assert.ok(buffer.length <= 65536);
     });
@@ -227,6 +234,20 @@ async function run() {
       await evaluate(`document.querySelectorAll('svg [data-kind="address-gap"]').length`),
       overview.scene.gaps?.offsets.length ?? 0,
     );
+    assert.equal(
+      await evaluate(`document.querySelectorAll('svg rect[data-kind="lane"]').length`),
+      0,
+    );
+    assert.equal(
+      await evaluate(`Boolean(document.querySelector('[data-testid="address-layout-note"]'))`),
+      false,
+    );
+    assert.equal(
+      await evaluate(
+        `getComputedStyle(document.querySelector('[data-testid="memory-diagram"]')).backgroundColor`,
+      ),
+      "rgb(255, 255, 255)",
+    );
     await layout("linear");
     await wait(
       () => evaluate(`document.querySelector('[data-testid="export-svg"]').disabled`),
@@ -346,6 +367,131 @@ async function run() {
       () => evaluate(`document.querySelectorAll("svg rect").length > 0`),
       "Recovery scene was not rendered.",
     );
+    const pinQuery =
+      "MATCH (obj: Object) WHERE obj.IsFree = false " +
+      "RETURN obj.Address, obj.Size, obj.Type AS PIN " +
+      "(Label = obj.Type, LabelPosition = OuterLeft, Background = Blue);";
+    await editor(pinQuery);
+    const pins = await runQuery();
+    assert.ok(["complete", "truncated"].includes(pins.status));
+    assert.equal(pins.sourcePartial, false);
+    assert.ok(pins.scene.elementCount > 1);
+    await wait(
+      () =>
+        evaluate(
+          `document.querySelectorAll('svg [data-element-id]').length === ${pins.scene.elementCount}`,
+        ),
+      "Bounded pin pages were not rendered.",
+    );
+    const positionedPins = await evaluate(`(() =>
+      [...document.querySelectorAll('svg [data-element-id]')].map(group => {
+        const shape = group.querySelector('.scene-shape');
+        const clip = group.querySelector('clipPath rect');
+        return {id:group.getAttribute('data-element-id'),
+          address:group.getAttribute('data-address'),
+          line:[...["x1","y1","x2","y2"].map(key => Number(shape.getAttribute(key)))],
+          text:clip ? ["x","y","width","height"].map(key => Number(clip.getAttribute(key))) : null};
+      }))()`);
+    assert.deepEqual(
+      positionedPins,
+      sceneElements.map((element) => ({
+        id: element.id,
+        address: element.source?.address ?? null,
+        line: [
+          element.geometry.start.x,
+          element.geometry.start.y,
+          element.geometry.finish.x,
+          element.geometry.finish.y,
+        ],
+        text: element.text
+          ? [
+              element.text.bounds.x,
+              element.text.bounds.y,
+              element.text.bounds.width,
+              element.text.bounds.height,
+            ]
+          : null,
+      })),
+      "Renderer must use shared pin geometry, text bounds and exact source addresses unchanged.",
+    );
+    const pinMetrics = () =>
+      evaluate(`(() => {
+      const svg = document.querySelector('svg[data-scene-version]');
+      const viewport = document.querySelector('[data-testid="memory-diagram"]').getBoundingClientRect();
+      const groups = [...svg.querySelectorAll('[data-element-id]')];
+      const matrix = svg.getScreenCTM();
+      const boxes = groups.map(group => group.querySelector('clipPath rect')).filter(Boolean)
+        .map(rect => {
+          const x = rect.x.baseVal.value, y = rect.y.baseVal.value;
+          const a = new DOMPoint(x, y).matrixTransform(matrix);
+          const b = new DOMPoint(x + rect.width.baseVal.value, y + rect.height.baseVal.value).matrixTransform(matrix);
+          return {left:a.x, top:a.y, right:b.x, bottom:b.y};
+        });
+      let overlaps = 0;
+      for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++)
+        if (boxes[a].left < boxes[b].right && boxes[b].left < boxes[a].right &&
+            boxes[a].top < boxes[b].bottom && boxes[b].top < boxes[a].bottom) overlaps++;
+      const texts = [...svg.querySelectorAll('[data-element-id] text')];
+      const visible = texts.filter(text => {
+        const rect = text.getBoundingClientRect();
+        return rect.top >= viewport.top && rect.bottom <= viewport.bottom &&
+          rect.left >= viewport.left && rect.right <= viewport.right;
+      });
+      const scale = Math.hypot(matrix.c, matrix.d);
+      return {overlaps, labels:boxes.length, visible:visible.length,
+        smallestFont:Math.min(...texts.map(text => Number(text.getAttribute("font-size")) * scale)),
+        width:svg.viewBox.baseVal.width,height:svg.viewBox.baseVal.height};
+    })()`);
+    await wait(
+      async () => (await pinMetrics()).smallestFont >= 11.5,
+      "Initial pin labels were shrunk below readable size.",
+    );
+    let metrics = await pinMetrics();
+    assert.equal(metrics.overlaps, 0, "OuterLeft pin labels overlap.");
+    assert.ok(metrics.labels > 1 && metrics.visible > 0);
+    const originalSize = window.getSize();
+    const originalViewport = await evaluate(
+      `document.querySelector('[data-testid="memory-diagram"]').clientWidth`,
+    );
+    window.setSize(originalSize[0] - 100, originalSize[1]);
+    await wait(
+      () =>
+        evaluate(
+          `document.querySelector('[data-testid="memory-diagram"]').clientWidth < ${originalViewport}`,
+        ),
+      "Window resizing did not resize the drawing viewport.",
+    );
+    await wait(
+      async () => (await pinMetrics()).smallestFont >= 11.5,
+      "Resize made pin labels unreadable.",
+    );
+    metrics = await pinMetrics();
+    assert.equal(metrics.overlaps, 0);
+    await click("Fit scene");
+    await wait(
+      async () => (await pinMetrics()).height === pins.scene.bounds.height,
+      "Explicit Fit no longer shows the whole scene.",
+    );
+    await click("Readable labels");
+    await wait(
+      async () => (await pinMetrics()).smallestFont >= 11.5,
+      "Readable labels did not restore useful scale.",
+    );
+    await evaluate(`document.querySelector('svg [data-element-id]:last-child').focus()`);
+    await wait(
+      () =>
+        evaluate(`(() => {
+      const selected = document.querySelector('svg [data-element-id]:last-child');
+      const shape = selected.querySelector('.scene-shape').getBoundingClientRect();
+      const viewport = document.querySelector('[data-testid="memory-diagram"]').getBoundingClientRect();
+      return shape.top >= viewport.top && shape.bottom <= viewport.bottom;
+    })()`),
+      "Keyboard focus did not reveal an off-screen pin.",
+    );
+    console.log(
+      `Readable pin labels: ${metrics.labels}; overlaps: ${metrics.overlaps}; initial/resize font >= 11.5 CSS px.`,
+    );
+    window.setSize(...originalSize);
     await editor(`${query};`);
     const beforeCrashQueries = queryResults.length;
     const beforeCrash = await evaluate("document.querySelector('textarea').value");

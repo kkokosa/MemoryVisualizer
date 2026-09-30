@@ -13,6 +13,7 @@ export type SceneRenderOptions = {
   hiddenLayers?: readonly number[];
   onSelect?: (id: string) => void;
   onHover?: (id: string | null) => void;
+  onFocus?: (id: string) => void;
 };
 
 function color(value: string): string {
@@ -131,22 +132,21 @@ export function createSceneSvg(
       }
       svg.appendChild(group);
     }
-    appendText(svg, gaps.legend, "address-layout-legend");
+    const description = create("desc", { id: "address-layout-description" });
+    description.textContent = gaps.legend.lines.map((line) => line.text).join(" ");
+    svg.appendChild(description);
+    svg.setAttribute("aria-describedby", "address-layout-description");
   }
   for (const [index, lane] of scene.lanes.entries()) {
-    const rect = create("rect", {
+    const group = create("g", {
       id: /^lane-\d+$/.test(lane.id) ? lane.id : `lane-${index}`,
       "data-kind": "lane",
-      ...boundsAttributes(lane.bounds),
-      fill: "none",
-      stroke: color(scene.theme.stroke),
-      "stroke-width": "1",
     });
     if (!scene.redaction.addresses) {
-      if (lane.runtime !== null) rect.setAttribute("data-runtime", String(lane.runtime));
-      if (lane.heap !== null) rect.setAttribute("data-heap", String(lane.heap));
+      if (lane.runtime !== null) group.setAttribute("data-runtime", String(lane.runtime));
+      if (lane.heap !== null) group.setAttribute("data-heap", String(lane.heap));
     }
-    svg.appendChild(rect);
+    svg.appendChild(group);
   }
   const hidden = new Set(options.hiddenLayers ?? []);
   for (const [index, element] of elements.slice(0, 1024).entries()) {
@@ -204,7 +204,10 @@ export function createSceneSvg(
     });
     group.addEventListener("pointerenter", () => options.onHover?.(element.id));
     group.addEventListener("pointerleave", () => options.onHover?.(null));
-    group.addEventListener("focus", () => options.onHover?.(element.id));
+    group.addEventListener("focus", () => {
+      options.onHover?.(element.id);
+      options.onFocus?.(element.id);
+    });
     group.addEventListener("blur", () => options.onHover?.(null));
     svg.appendChild(group);
   }

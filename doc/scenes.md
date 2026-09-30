@@ -35,7 +35,7 @@ before import. `SceneExecutionContext.create token` supplies defaults;
 | `Lanes`         | Ordinal ID, optional runtime/heap, positioned bounds; deterministic numeric runtime/heap order                                                                         |
 | `Elements`      | Stable ordinal ID, lane ID, numeric layer, rectangle or line geometry, geometry bounds, resolved style, optional positioned text and source association, clipping flag |
 | `Layout`        | Requested `SceneLayout.Linear` or `SceneLayout.Compact`; address redaction always uses schematic geometry instead                                                      |
-| `Gaps`          | Optional `SceneGapMarkers`: shared positioned band/lines/style, bounded x translation offsets, and one global positioned legend                                        |
+| `Gaps`          | Optional `SceneGapMarkers`: shared positioned band/lines/style, bounded x translation offsets, and accessible description in the unchanged Legend field                |
 | `Theme`         | Resolved six-digit lowercase hex colors                                                                                                                                |
 | `Redaction`     | Explicit addresses/strings/paths/labels policy                                                                                                                         |
 | `Completeness`  | Query status/reasons, source available/partial/diagnostic count, scene status/reasons                                                                                  |
@@ -105,6 +105,10 @@ and heap lanes**. Overlapping, duplicate and touching intervals merge using
 `bigint` endpoints. No heap kind, including frozen segments, is excluded.
 Unselected heap ranges are not scanned. Only empty gaps in that global union
 are compressed; occupied ranges retain one globally consistent byte scale.
+Here "empty" means **no admitted selected range**, not necessarily free or
+unmapped memory. An object-only selection omits other objects, segment space
+and other unselected ranges. Segment boxes are actual selected GC segment
+intervals; anonymous lane grouping is not a segment or an entire heap extent.
 Consequently overlapping addresses align across lanes and relative occupied
 byte lengths remain proportional. A directive itself cannot span a compressed
 gap, because its entire clipped interval contributes to the occupied union.
@@ -128,11 +132,14 @@ are included. Gaps number at most `admitted.Count + 1`; without an explicit
 viewport only internal gaps can exist. Empty scenes and zero-sized viewports
 have no markers. Compact scenes with no gaps retain linear geometry exactly.
 
-For compact scenes with gaps only, the first lane starts at y=48, reserving
-headroom for two diagonal axis strokes per gap and one plain ASCII legend:
-`Compressed address gaps; not linear distance.` A pale amber band spans all
-lanes at each break. All glyph coordinates, colors, stroke widths, font sizes
-and text metrics come from the scene engine and are included in scene bounds.
+For compact scenes with gaps only, the first lane starts at y=32, reserving
+headroom for two diagonal axis strokes at y=20..28 per gap. A pale amber band
+spans all lanes at each break. All painted glyph coordinates, colors and stroke
+widths come from the engine and are included in scene bounds. The unchanged
+Legend DTO carries this plain ASCII accessibility description, not a visible
+caption: `Compressed gaps contain no selected ranges; not necessarily free or
+unmapped memory. Horizontal distance is not linear.` Its retained text metrics
+are valid but do not enlarge the visible scene bounds.
 
 `SceneGapMarkers` is a packed repeated-glyph DTO:
 
@@ -141,43 +148,82 @@ Offsets : float list
 Band    : SceneBounds                   // X=0, global Y
 Lines   : (ScenePoint * ScenePoint) list // local X, global Y
 Style   : ResolvedStyle
-Legend  : SceneText                     // global, never translated or repeated
+Legend  : SceneText                     // accessible description, never painted
 ```
 
 There are no addresses, gap byte counts or source associations in this geometry
 DTO. Consumers instantiate Band/Lines with `translate(offset,0)` for each
-offset, and render Legend once with its own positioning. Keeping one glyph,
+offset, and expose Legend's lines joined with spaces once as a description. Keeping one glyph,
 rather than a per-lane/per-gap geometry expansion, bounds transport metadata.
 SVG and desktop render noninteractive, non-source groups `address-gap-N` with
 `data-kind=address-gap`, using those same primitives and translations after the
-canvas background and before lane outlines/elements. Bands use `Style.Fill`
+canvas background and before lane metadata/elements. Bands use `Style.Fill`
 with no stroke; lines use no fill and `Style.Stroke`/`Style.StrokeWidth`.
-The global legend uses the shared safe text/clipping helper with ID prefix
-`address-layout-legend` (clip ID `address-layout-legend-text-clip`).
+The description is safely serialized as `<desc id="address-layout-description">`,
+referenced by root `aria-describedby` only when compact gaps are present.
+It produces neither visible text nor clipping geometry.
 `data-address-layout` is `compact`, `relative` for linear mode,
 or `schematic` for address-redacted scenes.
 
 Within each lane, the maximum of `max(16, directive.Width)` determines content
 height `H`. Width is the cross-axis thickness hint, in scene units, with a
 16-unit visibility floor and a 4096-unit ceiling. It never changes byte scale.
-The first lane starts at y=16 (y=48 only for compact-with-gaps); lane height is
-`H+80`, followed by a 16-unit gap.
+The first lane starts at y=16 (y=32 only for compact-with-gaps); the initial lane
+height is `H+80`, followed by a 16-unit gap.
 An element of height `h` starts at `lane.Y+40+(H-h)/2`. This aligns intervals
 across generation/segment/object layers in the same lane.
 
 Paint order is layer, statement index, then admission index. Layers are
 Memory=0, Segment=1, Generation=2, Free=3, Object/other BOX=4, PIN=5. Later
-elements paint on top; overlap is not avoided or made exclusive. Label overlap
-is deliberate too: there is no nondeterministic collision solver. Query result
+elements paint on top; box/InnerCenter label overlap is not avoided or made
+exclusive. OuterLeft labeled pins use the deterministic row policy below. Query result
 ordering is already deterministic; only bounded admitted elements are sorted.
 Scene truncation can change automatic fit bounds because missing elements are
 not scanned to discover an unbounded global extent.
 
-Lane outlines make lane separation visible; their explicit runtime/heap
-associations are retained for selection. The root starts at (0,0), reserves 528
+Lanes retain their explicit runtime/heap associations and positioned bounds
+for selection and layout. SVG/desktop emit inert `<g data-kind="lane">` metadata
+with ordinal ID and optional runtime/heap fields, not outlined rectangles or
+captions: those bounds are layout allocations, **not actual heap extents**.
+The root starts at (0,0), reserves 528
 units to the left for labels, and includes at least 16 right/bottom margin units.
 Long labels may enlarge root width, but do not rescale lanes. An empty scene is
 valid, has no lanes/elements, and is 32 units high.
+
+### Readable OuterLeft PIN rows
+
+Only admitted `PIN` directives with `LabelPosition=OuterLeft` and an actual
+resolved `SceneText` participate. After label creation, each lane packs the
+horizontal interval covering its label and pin stroke into collision-free
+rows. Intervals sort by their positioned left edge, then admission index;
+this matters because different label lengths can reverse pin-address order.
+A priority queue keyed by `(occupied row end X, row index)` reuses the earliest
+finishing row only if there is at least eight units of horizontal separation.
+Otherwise it creates a new row. All inputs and memory are bounded by admission;
+sorting/packing is `O(n log n)`, not a whole-heap scan or pairwise solver.
+
+Rows share a content height equal to the largest pin or label height in that
+lane, with eight units between rows. Each short standalone tick and its entire
+label translate together to the row center, without a long leader through
+other labels. X, interval mapping, IDs, source associations, styles, layers and
+clipping flags never change. OuterLeft text still ends eight units before its
+own tick. Multiline labels keep all baselines and clipping bounds attached.
+
+If a lane also contains boxes, unlabeled pins or explicit InnerCenter pins,
+those retain their original content-band Y; eligible pins start below that
+band and its text/stroke extents. Otherwise the first row remains centered on
+the original band (a single pin retains its original Y). Lanes expand as needed;
+later lanes and all their elements translate by the accumulated expansion.
+The scene and shared gap band include the resulting tall layout. Renderers
+consume these positions without browser measurement or reflow.
+
+No extra label/element elision or source grouping occurs. Existing label and
+admission limits still apply, with explicit truncation. No-text pins, including
+redacted labels, do not participate; address redaction bypasses packing entirely.
+All existing coordinate/output limits remain: even the core maximum 4096
+coincident, 4096-unit-tall pins fit below 17 million scene units, well within
+the transport's finite safe-number bound. Hosts may pan/zoom the tall scene
+but must not lay it out again.
 
 ## Colors and deterministic typography
 
@@ -202,8 +248,9 @@ InnerCenter centers the text bounds on the rectangle or PIN marker; OuterLeft
 places the right edge eight units left of the target. Both are vertically
 centered on the target. Text may overhang a small rectangle; its separate bounds
 are included in scene bounds. A per-label local clip guarantees glyph overhang
-does not escape the label allocation. Small/overlapping targets can still produce
-overlapping labels; select fewer targets or use a focused viewport.
+does not escape the label allocation. Small/overlapping boxes and explicit
+InnerCenter pins can still produce overlapping labels; OuterLeft labeled pins
+instead use the shared rows described above.
 
 Printable ASCII is retained. CRLF is one explicit line break; bare CR/LF break
 lines. A break at the 64-cell boundary does not insert a second break; a trailing
@@ -243,7 +290,7 @@ absolute/relative address gaps, declared thickness, original clipping flags and
 numeric labels rather than leaking them through geometry or label length.
 Lanes expand horizontally as necessary; no address-derived wrap/scale is used.
 Compaction is bypassed entirely and `Gaps=None` regardless of requested layout;
-neither marker count, legend nor compact headroom leaks the original gaps.
+neither marker count, description, pin rows nor compact headroom leaks the original gaps.
 PIN remains a zero-width, 16-unit marker. Original runtime/heap values are
 replaced by anonymous ordinal lanes. IDs remain ordinal, not hashes of removed
 data. SnapshotId remains in memory for host safety, but **never in SVG**.
@@ -276,9 +323,10 @@ input before admission. Even a manually constructed huge QueryResult has only
 bounded directives examined; query rows and diagnostic text are never enumerated.
 Bounds discovery/sorting operate on at most MaxElements already-admitted items.
 Compact union construction and exact prefix calculations are similarly bounded;
-guards run before/after sorting and throughout merging and positioning.
+guards run before/after sorting and throughout merging, pin row partitioning,
+lane translation and positioning.
 Each element contains one rectangle/line plus at most one two-line label; SVG
-adds fixed-size groups/clips and at most MaxLanes outlines. This also bounds
+adds fixed-size groups/clips and at most MaxLanes inert metadata groups. This also bounds
 primitive/DOM overhead and text work, not just final array length. The writer
 streams through a byte-counting wrapper rather than building a giant XML string.
 Its fixed XML buffer is additional bounded memory.
@@ -309,8 +357,8 @@ status/reason/source/redaction attributes preserve that fact.
 
 ## Standalone SVG safety and determinism
 
-The writer emits only SVG root/groups, rectangles, lines, local clip definitions
-and editable text. There are no scripts, foreignObject, arbitrary HTML, external
+The writer emits only SVG root/groups, rectangles, lines, local clip definitions,
+editable label text and accessible descriptions. There are no scripts, foreignObject, arbitrary HTML, external
 CSS, images, downloaded fonts or external assets. `url(#element-N-text-clip)` is a
 generated local reference, not user input. XML text and attributes are written
 through `XmlWriter`; invalid text units have already been visibly substituted.
@@ -325,9 +373,11 @@ completes under the budgets. No pixel-identical browser screenshot is implied.
 
 The checked-in `tests/MemoryVisualizer.Core.Tests/fixtures/scene-v2.json` is a
 readable positioned-scene golden projection, not an IPC schema. `scene-v2.svg`
-is its exact writer output. The fixtures are named for scene schema 2; linear
-baseline geometry/SVG bytes are unchanged from schema 1 apart from the embedded
-version. Tests also cover large addresses, gaps, overlaps,
+is its exact writer output. The fixtures are named for scene schema 2. The
+linear BOX baseline geometry is unchanged; SVG intentionally replaces lane
+outlines with inert metadata groups. This presentation/row-layout update keeps
+scene schema 2, native protocol 3 and all DTO shapes unchanged.
+Tests also cover large addresses, gaps, overlaps,
 same addresses across runtimes/heaps, zero-size ranges, clipping, all caps,
 redaction, cancellation/staleness, unsafe text and culture changes. Compact
 unit cases additionally cover massive gaps with wide Blue segments

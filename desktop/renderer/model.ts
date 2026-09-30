@@ -11,11 +11,18 @@ import {
 } from "../src/native-types.js";
 
 export const UINT64_MAX = (1n << 64n) - 1n;
-export const LAYERS = ["Memory", "Segments", "Generations", "Free objects", "Objects", "Pins"];
+export const LAYERS = [
+  "Memory",
+  "Regions / segments",
+  "Generations",
+  "Free objects",
+  "Objects",
+  "Pins",
+];
 export const TEMPLATES = [
   {
-    name: "Segments + generations",
-    description: "A useful first illustration, without scanning every object.",
+    name: "GC regions + generations",
+    description: "GC regions or legacy segments, using the compatible Segment selector.",
     query:
       "MATCH (seg: Segment) RETURN seg AS BOX (Background = Blue, Width = 40);\n" +
       "MATCH (gen: Generation) RETURN gen.Generation AS BOX " +
@@ -30,7 +37,7 @@ export const TEMPLATES = [
   },
   {
     name: "Live object pins",
-    description: "Bounded live-object markers; narrow with a viewport or predicate.",
+    description: "Labeled pin rows. Pan to explore; narrow with a viewport or predicate.",
     query:
       "MATCH (obj: Object) WHERE obj.IsFree = false RETURN obj.Address, obj.Size, obj.Type " +
       "AS PIN (Label = obj.Type, LabelPosition = OuterLeft, Background = Blue);",
@@ -214,6 +221,92 @@ export async function collectScenePages(
 
 export function fittedBounds(bounds: Bounds): Bounds {
   return { ...bounds, width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) };
+}
+
+export type ViewportSize = { width: number; height: number };
+
+export function hasPinLabels(elements: readonly SceneElement[]): boolean {
+  return elements.some((element) => element.geometry.kind === "line" && element.text !== null);
+}
+
+export function elementBounds(element: SceneElement): Bounds {
+  const shape = element.bounds;
+  const text = element.text?.bounds;
+  if (!text) return shape;
+  const x = Math.min(shape.x, text.x);
+  const y = Math.min(shape.y, text.y);
+  return {
+    x,
+    y,
+    width: Math.max(shape.x + shape.width, text.x + text.width) - x,
+    height: Math.max(shape.y + shape.height, text.y + text.height) - y,
+  };
+}
+
+export function readableBounds(
+  bounds: Bounds,
+  elements: readonly SceneElement[],
+  viewport: ViewportSize,
+): Bounds {
+  if (!(viewport.width > 0 && viewport.height > 0))
+    throw new Error("A readable view requires a visible viewport.");
+  let first: Bounds | undefined;
+  for (const element of elements) {
+    if (element.geometry.kind !== "line" || !element.text) continue;
+    const candidate = element.text.bounds;
+    if (!first || candidate.y < first.y || (candidate.y === first.y && candidate.x < first.x))
+      first = candidate;
+  }
+  const target = first ?? bounds;
+  return {
+    x: Math.max(bounds.x, Math.min(target.x - 16, bounds.x + bounds.width - viewport.width)),
+    y:
+      first && first.y + first.height > bounds.y + viewport.height - 16
+        ? Math.max(bounds.y, first.y - 16)
+        : bounds.y,
+    width: viewport.width,
+    height: viewport.height,
+  };
+}
+
+export function viewScale(view: Bounds, viewport: ViewportSize): number {
+  return Math.min(viewport.width / view.width, viewport.height / view.height);
+}
+
+export function initialBounds(
+  bounds: Bounds,
+  elements: readonly SceneElement[],
+  viewport: ViewportSize,
+): Bounds {
+  const fitted = fittedBounds(bounds);
+  return hasPinLabels(elements) && viewScale(fitted, viewport) < 1
+    ? readableBounds(bounds, elements, viewport)
+    : fitted;
+}
+
+export function resizedBounds(view: Bounds, previous: ViewportSize, next: ViewportSize): Bounds {
+  const unitsPerPixel = Math.max(view.width / previous.width, view.height / previous.height);
+  const width = next.width * unitsPerPixel;
+  const height = next.height * unitsPerPixel;
+  return {
+    x: view.x + (view.width - width) / 2,
+    y: view.y + (view.height - height) / 2,
+    width,
+    height,
+  };
+}
+
+export function revealBounds(view: Bounds, target: Bounds): Bounds {
+  const offset = (start: number, size: number, targetStart: number, targetSize: number) => {
+    if (targetStart < start + 16 || targetSize > size - 32) return targetStart - 16;
+    if (targetStart + targetSize > start + size - 16) return targetStart + targetSize + 16 - size;
+    return start;
+  };
+  return {
+    ...view,
+    x: offset(view.x, view.width, target.x, target.width),
+    y: offset(view.y, view.height, target.y, target.height),
+  };
 }
 
 export function zoomBounds(view: Bounds, factor: number, original: Bounds): Bounds {

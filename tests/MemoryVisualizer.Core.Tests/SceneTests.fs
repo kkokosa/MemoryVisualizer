@@ -1253,7 +1253,7 @@ let ``Compact sorting merging and positioning obey cancellation elapsed and stal
         )
 
 [<Fact>]
-let ``Compact SVG instantiates only shared marker primitives and one positioned legend with stable bytes`` () =
+let ``Compact SVG paints only shared gap primitives with inert lanes and one accessible description`` () =
     let options = { compactOptions with PlotWidth = 64 }
 
     let directives = [
@@ -1301,7 +1301,9 @@ let ``Compact SVG instantiates only shared marker primitives and one positioned 
     let lastLane = List.last value.Lanes
     Assert.True(childIndex "element-0" > childIndex lastLane.Id)
     close (lastLane.Bounds.Y + lastLane.Bounds.Height) (markers.Band.Y + markers.Band.Height)
-    Assert.True(markers.Legend.Bounds.X + markers.Legend.Bounds.Width < value.Bounds.Width)
+    close (528.0 + 64.0 + 16.0) value.Bounds.Width
+    close 32.0 value.Lanes.Head.Bounds.Y
+    Assert.True(markers.Legend.Bounds.X + markers.Legend.Bounds.Width > value.Bounds.Width)
     Assert.True(markers.Legend.Bounds.Y + markers.Legend.Bounds.Height < value.Lanes.Head.Bounds.Y)
 
     let number (value: float) =
@@ -1334,15 +1336,527 @@ let ``Compact SVG instantiates only shared marker primitives and one positioned 
             Assert.Equal(number markers.Style.StrokeWidth, line.Attribute(XName.Get "stroke-width").Value)
             Assert.True(first.Y >= 0.0 && last.Y < value.Bounds.Height)
 
-    let legend = Assert.Single(document.Descendants(ns + "text"))
-    Assert.Equal("url(#address-layout-legend-text-clip)", legend.Parent.Attribute(XName.Get "clip-path").Value)
-    Assert.Null(legend.Parent.Attribute(XName.Get "transform"))
-    Assert.Same(document.Root, legend.Parent.Parent)
-    let clip = Assert.Single(document.Descendants(ns + "clipPath"))
-    Assert.Equal("address-layout-legend-text-clip", clip.Attribute(XName.Get "id").Value)
-    Assert.Equal(markers.Legend.Lines.Head.Text, legend.Value)
-    Assert.Contains("Compressed address gaps", legend.Value)
-    Assert.Contains("not linear distance", legend.Value)
-    Assert.Equal(number markers.Legend.Lines.Head.X, legend.Attribute(XName.Get "x").Value)
-    Assert.Equal(number markers.Legend.Lines.Head.Baseline, legend.Attribute(XName.Get "y").Value)
-    Assert.All(legend.Value, fun ch -> Assert.InRange(int ch, 32, 126))
+    Assert.Empty(document.Descendants(ns + "text"))
+    Assert.Empty(document.Descendants(ns + "clipPath"))
+    let description = Assert.Single(document.Descendants(ns + "desc"))
+    Assert.Same(document.Root, description.Parent)
+    Assert.Equal("address-layout-description", description.Attribute(XName.Get "id").Value)
+    Assert.Equal("address-layout-description", document.Root.Attribute(XName.Get "aria-describedby").Value)
+    Assert.Equal(markers.Legend.Lines |> List.map _.Text |> String.concat " ", description.Value)
+    Assert.Contains("no selected ranges", description.Value)
+    Assert.Contains("not necessarily free or unmapped memory", description.Value)
+    Assert.Contains("not linear", description.Value)
+    Assert.All(description.Value, fun ch -> Assert.InRange(int ch, 32, 126))
+    Assert.InRange(description.Value.Length, 1, 128)
+
+    for lane in value.Lanes do
+        let node = children[childIndex lane.Id]
+        Assert.Equal(ns + "g", node.Name)
+        Assert.Equal("lane", node.Attribute(XName.Get "data-kind").Value)
+        Assert.Equal(string lane.Runtime.Value, node.Attribute(XName.Get "data-runtime").Value)
+        Assert.Equal(string lane.Heap.Value, node.Attribute(XName.Get "data-heap").Value)
+        Assert.Empty(node.Elements())
+        Assert.Null(node.Attribute(XName.Get "stroke"))
+        Assert.Null(node.Attribute(XName.Get "width"))
+
+let private labeledPin runtimeIndex heap address label = {
+    directive runtimeIndex heap address 1UL with
+        Kind = DrawingKind.Pin
+        LabelPosition = LabelPosition.OuterLeft
+        Label = Some(QueryValue.Text label)
+}
+
+let private compositeBounds (element: SceneElement) =
+    match element.Text with
+    | None -> element.Bounds
+    | Some text ->
+        let left = min element.Bounds.X text.Bounds.X
+        let top = min element.Bounds.Y text.Bounds.Y
+
+        {
+            X = left
+            Y = top
+            Width =
+                max (element.Bounds.X + element.Bounds.Width) (text.Bounds.X + text.Bounds.Width)
+                - left
+            Height =
+                max (element.Bounds.Y + element.Bounds.Height) (text.Bounds.Y + text.Bounds.Height)
+                - top
+        }
+
+let private assertContained (value: PositionedScene) =
+    for element in value.Elements do
+        let bounds = compositeBounds element
+        let lane = value.Lanes |> List.find (fun lane -> lane.Id = element.LaneId)
+        Assert.True(bounds.X >= value.Bounds.X)
+        Assert.True(bounds.X + bounds.Width <= value.Bounds.X + value.Bounds.Width)
+        Assert.True(bounds.Y >= lane.Bounds.Y)
+        Assert.True(bounds.Y + bounds.Height <= lane.Bounds.Y + lane.Bounds.Height)
+        Assert.True(bounds.Y + bounds.Height <= value.Bounds.Y + value.Bounds.Height)
+
+        match element.Geometry with
+        | SceneGeometry.Rectangle shape -> Assert.Equal(element.Bounds, shape)
+        | SceneGeometry.Line(first, last) ->
+            close element.Bounds.X first.X
+            close element.Bounds.X last.X
+            close element.Bounds.Y first.Y
+            close (element.Bounds.Y + element.Bounds.Height) last.Y
+
+        element.Text
+        |> Option.iter (fun text ->
+            text.Lines
+            |> List.iteri (fun row line ->
+                close text.Bounds.X line.X
+                close (text.Bounds.Y + 11.0 + float row * text.LineHeight) line.Baseline))
+
+let private assertSeparated (first: SceneElement) (second: SceneElement) =
+    let a, b = compositeBounds first, compositeBounds second
+
+    Assert.True(
+        a.X + a.Width + 8.0 <= b.X
+        || b.X + b.Width + 8.0 <= a.X
+        || a.Y + a.Height + 8.0 <= b.Y
+        || b.Y + b.Height + 8.0 <= a.Y,
+        $"Overlapping composites: {first.Id} {a}, {second.Id} {b}"
+    )
+
+[<Theory>]
+[<InlineData("short")>]
+[<InlineData("first\nsecond")>]
+let ``Single OuterLeft pin preserves its original tick center and all text remains attached`` label =
+    let value = draw [ labeledPin 0 0 100UL label ]
+    let pin = value.Elements.Head
+    close 56.0 pin.Bounds.Y
+    close 16.0 pin.Bounds.Height
+    close 528.0 pin.Bounds.X
+    close (pin.Bounds.X - 8.0) (pin.Text.Value.Bounds.X + pin.Text.Value.Bounds.Width)
+    close (pin.Bounds.Y + 8.0) (pin.Text.Value.Bounds.Y + pin.Text.Value.Bounds.Height / 2.0)
+    assertContained value
+
+[<Fact>]
+let ``Variable width pin intervals pack deterministically into reusable nonoverlapping rows`` () =
+    let options = {
+        SceneOptions.defaults with
+            Viewport = Some { Start = 0UL; Size = 1024UL }
+    }
+
+    let value =
+        build
+            options
+            (query [
+                labeledPin 0 0 100UL "A"
+                labeledPin 0 0 200UL (String.replicate 20 "B")
+                labeledPin 0 0 300UL "C"
+                labeledPin 0 0 300UL "D"
+            ])
+        |> scene
+
+    let pins = value.Elements
+    close 56.0 pins[1].Bounds.Y
+    close 80.0 pins[0].Bounds.Y
+    close 80.0 pins[2].Bounds.Y
+    close 56.0 pins[3].Bounds.Y
+    close 628.0 pins[0].Bounds.X
+    close 728.0 pins[1].Bounds.X
+    close 828.0 pins[2].Bounds.X
+    close 828.0 pins[3].Bounds.X
+
+    for index in 0 .. pins.Length - 1 do
+        for next in index + 1 .. pins.Length - 1 do
+            assertSeparated pins[index] pins[next]
+
+    assertContained value
+
+[<Theory>]
+[<InlineData(148UL, 80.0)>]
+[<InlineData(149UL, 56.0)>]
+let ``Pin row reuse requires eight units after the previous tick stroke`` secondAddress expectedY =
+    let options = {
+        SceneOptions.defaults with
+            Viewport = Some { Start = 0UL; Size = 2048UL }
+    }
+
+    let value =
+        build options (query [ labeledPin 0 0 100UL "A"; labeledPin 0 0 secondAddress "B" ])
+        |> scene
+
+    close expectedY value.Elements[1].Bounds.Y
+    assertSeparated value.Elements[0] value.Elements[1]
+
+    if expectedY = 56.0 then
+        let gap =
+            value.Elements[1].Text.Value.Bounds.X
+            - value.Elements[0].Bounds.X
+            - value.Elements[0].Style.StrokeWidth / 2.0
+
+        close 8.0 gap
+
+[<Fact>]
+let ``Pin packing respects admitted element and text caps without scanning rejected tails`` () =
+    let options = {
+        SceneOptions.defaults with
+            Limits = {
+                SceneLimits.defaults with
+                    MaxElements = 2
+            }
+    }
+
+    let accepted = [ labeledPin 0 0 100UL "A"; labeledPin 0 0 100UL "B" ]
+
+    let input =
+        accepted
+        @ (labeledPin 0 0 100UL "C"
+           :: List.replicate 100000 Unchecked.defaultof<DrawingDirective>)
+
+    let baseline = build options (query accepted) |> scene
+    let result = build options (query input)
+    Assert.Equal(SceneStatus.Truncated [ SceneTruncation.Elements ], result.Status)
+    Assert.Equal<SceneElement list>(baseline.Elements, result.Scene.Value.Elements)
+    Assert.Equal(baseline.Bounds, result.Scene.Value.Bounds)
+
+    let textLimited =
+        build
+            {
+                options with
+                    Limits = {
+                        options.Limits with
+                            MaxTotalLabelCharacters = 1
+                    }
+            }
+            (query accepted)
+
+    Assert.Equal(SceneStatus.Truncated [ SceneTruncation.TotalLabelCharacters ], textLimited.Status)
+    Assert.Equal(2, textLimited.Scene.Value.Elements.Length)
+    Assert.True textLimited.Scene.Value.Elements[0].Text.IsSome
+    Assert.True textLimited.Scene.Value.Elements[1].Text.IsNone
+    close 56.0 textLimited.Scene.Value.Elements[1].Bounds.Y
+    assertSeparated textLimited.Scene.Value.Elements[0] textLimited.Scene.Value.Elements[1]
+
+[<Theory>]
+[<InlineData(false)>]
+[<InlineData(true)>]
+let ``Mixed pin rows avoid boxes and labels while shifting following lanes and preserving source geometry X``
+    useCompact
+    =
+    let options = if useCompact then compactOptions else SceneOptions.defaults
+
+    let source = [
+        {
+            directive 0 0 100UL 8UL with
+                Width = 40
+                Label = Some(QueryValue.Text "base\nband")
+        }
+        labeledPin 0 0 100UL "One"
+        {
+            labeledPin 0 0 101UL (String.replicate 128 "X") with
+                Width = 24
+        }
+        labeledPin 0 0 101UL "Three\nLines"
+        {
+            labeledPin 0 0 101UL "explicit center" with
+                LabelPosition = LabelPosition.InnerCenter
+        }
+        {
+            directive 0 0 101UL 1UL with
+                Kind = DrawingKind.Pin
+        }
+        labeledPin 0 1 100UL "OtherHeap"
+        labeledPin 0 1 100UL "OtherHeapAgain"
+        {
+            directive 1 0 (1UL <<< 60) 10UL with
+                Label = Some(QueryValue.Text "later")
+        }
+    ]
+
+    let value = build options (query source) |> scene
+
+    let baseline =
+        build
+            options
+            (query (
+                source
+                |> List.map (fun item -> {
+                    item with
+                        LabelPosition = LabelPosition.InnerCenter
+                })
+            ))
+        |> scene
+
+    let find id (value: PositionedScene) =
+        value.Elements |> List.find (fun item -> item.Id = id)
+
+    let pins = [ find "element-1" value; find "element-2" value; find "element-3" value ]
+
+    for pin in pins do
+        for other in value.Elements |> List.filter (fun other -> other.Id <> pin.Id) do
+            assertSeparated pin other
+
+        close (pin.Bounds.X - 8.0) (pin.Text.Value.Bounds.X + pin.Text.Value.Bounds.Width)
+        close (pin.Bounds.Y + pin.Bounds.Height / 2.0) (pin.Text.Value.Bounds.Y + pin.Text.Value.Bounds.Height / 2.0)
+
+    for element in value.Elements do
+        let old = find element.Id baseline
+        close old.Bounds.X element.Bounds.X
+        close old.Bounds.Width element.Bounds.Width
+        close old.Bounds.Height element.Bounds.Height
+        Assert.Equal(old.Source, element.Source)
+        Assert.Equal(old.Layer, element.Layer)
+        Assert.Equal(old.LaneId, element.LaneId)
+        Assert.Equal(old.Style, element.Style)
+        Assert.Equal(old.IsClipped, element.IsClipped)
+
+    for id in [ "element-0"; "element-4"; "element-5"; "element-8" ] do
+        let current = find id value
+        let old = find id baseline
+        let currentLane = value.Lanes |> List.find (fun lane -> lane.Id = current.LaneId)
+        let oldLane = baseline.Lanes |> List.find (fun lane -> lane.Id = old.LaneId)
+        close (old.Bounds.Y - oldLane.Bounds.Y) (current.Bounds.Y - currentLane.Bounds.Y)
+
+    Assert.True(value.Lanes[1].Bounds.Y > baseline.Lanes[1].Bounds.Y)
+    Assert.True(value.Lanes[2].Bounds.Y > baseline.Lanes[2].Bounds.Y)
+    assertContained value
+    Assert.Equal(svg value, build options (query source) |> scene |> svg)
+
+    if useCompact then
+        let band = value.Gaps.Value.Band
+        let last = List.last value.Lanes
+        close value.Lanes.Head.Bounds.Y band.Y
+        close (last.Bounds.Y + last.Bounds.Height) (band.Y + band.Height)
+        close (band.Y + band.Height + 16.0) value.Bounds.Height
+
+[<Theory>]
+[<InlineData(1024, 16)>]
+[<InlineData(4096, 4096)>]
+let ``Dense coincident labeled pins remain bounded complete and collision free at scene capacity`` count thickness =
+    let options = {
+        compactOptions with
+            Limits = {
+                SceneLimits.defaults with
+                    MaxDirectives = count
+                    MaxElements = count
+            }
+    }
+
+    let inputs = [
+        for _ in 1..count ->
+            {
+                labeledPin 0 0 UInt64.MaxValue "Type" with
+                    Width = thickness
+            }
+    ]
+
+    let value = build options (query inputs) |> scene
+    Assert.Equal(count, value.Elements.Length)
+    let ordered = value.Elements |> List.sortBy _.Bounds.Y
+
+    for index in 0 .. count - 1 do
+        let pin = ordered[index]
+        Assert.Equal($"element-{index}", pin.Id)
+        close 528.0 pin.Bounds.X
+        Assert.Equal("0xffffffffffffffff", pin.Source.Value.Address)
+        Assert.Equal("Type", pin.Text.Value.Lines.Head.Text)
+
+        if index > 0 then
+            close 8.0 (pin.Bounds.Y - ordered[index - 1].Bounds.Y - ordered[index - 1].Bounds.Height)
+
+    Assert.True(Double.IsFinite value.Bounds.Height)
+    Assert.True(value.Bounds.Height < 17_000_000.0)
+    Assert.True(value.Bounds.Height < 9007199254740991.0)
+    assertContained value
+
+    let overflow =
+        build options (query (inputs @ [ Unchecked.defaultof<DrawingDirective> ]))
+
+    Assert.Equal(SceneStatus.Truncated [ SceneTruncation.Directives ], overflow.Status)
+    Assert.Equal<SceneElement list>(value.Elements, overflow.Scene.Value.Elements)
+    Assert.Equal(value.Bounds, overflow.Scene.Value.Bounds)
+
+[<Theory>]
+[<InlineData(false)>]
+[<InlineData(true)>]
+let ``Pin row packing preserves large address clipping and equal address X across runtime lanes`` useCompact =
+    let options = {
+        (if useCompact then compactOptions else SceneOptions.defaults) with
+            Viewport =
+                Some {
+                    Start = UInt64.MaxValue - 15UL
+                    Size = 16UL
+                }
+    }
+
+    let value =
+        build
+            options
+            (query [
+                {
+                    labeledPin 0 0 (UInt64.MaxValue - 31UL) "clipped" with
+                        Size = 32UL
+                }
+                labeledPin 0 0 UInt64.MaxValue "end"
+                labeledPin 0 0 UInt64.MaxValue "duplicate"
+                labeledPin 1 0 UInt64.MaxValue "same address"
+            ])
+        |> scene
+
+    Assert.True value.Elements[0].IsClipped
+    close 528.0 value.Elements[0].Bounds.X
+    close 1488.0 value.Elements[1].Bounds.X
+    close value.Elements[1].Bounds.X value.Elements[2].Bounds.X
+    close value.Elements[1].Bounds.X value.Elements[3].Bounds.X
+    assertSeparated value.Elements[1] value.Elements[2]
+    assertContained value
+
+[<Fact>]
+let ``Exact Live object pins MQL retains every type label with separated standalone ticks`` () =
+    let snapshot = IndexedHeapSnapshotTests.fixture ()
+
+    use store =
+        IndexedHeapSnapshot.Create(snapshot, SnapshotIndexLimits.defaults, token)
+        |> unwrap
+
+    let plan =
+        Mql.compile
+            QueryLimits.defaults
+            snapshot.Metadata.Id
+            "MATCH(obj:Object) WHERE obj.IsFree=false RETURN obj AS PIN(Label=obj.Type, LabelPosition=OuterLeft)"
+        |> unwrap
+
+    let result =
+        Mql.execute QueryLimits.defaults plan store (QueryExecutionContext.create token)
+
+    let value = build compactOptions result |> scene
+    Assert.NotEmpty value.Elements
+    Assert.Equal(result.Directives.Length, value.Elements.Length)
+
+    for pin in value.Elements do
+        Assert.True pin.Text.IsSome
+        close 0.0 pin.Bounds.Width
+
+        for other in
+            value.Elements
+            |> List.filter (fun other -> String.CompareOrdinal(other.Id, pin.Id) > 0) do
+            assertSeparated pin other
+
+    assertContained value
+
+[<Fact>]
+let ``Redacted OuterLeft labels bypass row packing without address or label dependent geometry`` () =
+    let first = [
+        {
+            labeledPin 0 0 1UL (String.replicate 128 "A") with
+                Width = 4096
+        }
+        labeledPin 0 0 1UL "B"
+        labeledPin 0 1 UInt64.MaxValue "C\nD"
+    ]
+
+    let second = [
+        labeledPin 6 8 1000UL "secret"
+        labeledPin 6 8 100000UL "different"
+        labeledPin 7 9 200000UL "value"
+    ]
+
+    for layout in [ SceneLayout.Linear; SceneLayout.Compact ] do
+        let options = {
+            SceneOptions.defaults with
+                Layout = layout
+                Redaction = {
+                    RedactionPolicy.none with
+                        Addresses = true
+                }
+        }
+
+        let a = build options (query first) |> scene
+        let b = build options (query second) |> scene
+        Assert.Equal(svg a, svg b)
+        Assert.Equal(a.Bounds, b.Bounds)
+        Assert.True a.Gaps.IsNone
+        close 56.0 a.Elements[0].Bounds.Y
+        close 56.0 a.Elements[1].Bounds.Y
+        Assert.All(a.Elements, fun item -> Assert.True item.Text.IsNone)
+        Assert.DoesNotContain("aria-describedby", svg a)
+        Assert.DoesNotContain("address-layout-description", svg a)
+
+    for policy in
+        [
+            {
+                RedactionPolicy.none with
+                    Labels = true
+            }
+            {
+                RedactionPolicy.none with
+                    Strings = true
+            }
+            {
+                RedactionPolicy.none with
+                    Paths = true
+            }
+        ] do
+        let options = {
+            SceneOptions.defaults with
+                Redaction = policy
+        }
+
+        let labeled = build options (query first) |> scene
+
+        let bare =
+            build options (query (first |> List.map (fun pin -> { pin with Label = None })))
+            |> scene
+
+        Assert.Equal(svg bare, svg labeled)
+
+[<Fact>]
+let ``Pin packing cancellation staleness and elapsed expiry discard output at every cooperative checkpoint`` () =
+    let input =
+        query [
+            labeledPin 0 0 100UL "A"
+            labeledPin 0 0 100UL "B"
+            labeledPin 0 0 101UL "variable\nheight"
+            labeledPin 0 1 101UL "next lane"
+        ]
+
+    let mutable total = 0
+
+    let baseline = {
+        context () with
+            IsSnapshotCurrent =
+                fun _ ->
+                    total <- total + 1
+                    true
+    }
+
+    Scene.build compactOptions input baseline |> scene |> ignore
+
+    for failure in [ "cancel"; "stale"; "elapsed" ] do
+        for stop in 1..total do
+            use cancellation = new CancellationTokenSource()
+            let clock = Clock()
+            let mutable checks = 0
+
+            let ctx = {
+                SceneExecutionContext.create cancellation.Token with
+                    TimeProvider = clock
+                    IsSnapshotCurrent =
+                        fun _ ->
+                            checks <- checks + 1
+
+                            if checks = stop then
+                                if failure = "cancel" then
+                                    cancellation.Cancel()
+
+                                if failure = "elapsed" then
+                                    clock.Timestamp <- 5000L
+
+                            not (checks = stop && failure = "stale")
+            }
+
+            let result = Scene.build compactOptions input ctx
+            Assert.True(result.Scene.IsNone, $"{failure} at checkpoint {stop} published a scene")
+
+            Assert.Equal(
+                (match failure with
+                 | "cancel" -> SceneStatus.Cancelled
+                 | "stale" -> SceneStatus.Failed
+                 | _ -> SceneStatus.Truncated [ SceneTruncation.ElapsedTime ]),
+                result.Status
+            )

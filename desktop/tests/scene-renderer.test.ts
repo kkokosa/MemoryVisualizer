@@ -17,7 +17,13 @@ import {
   diagnosticRange,
   draftSettings,
   fittedBounds,
+  elementBounds,
   highlightQuery,
+  initialBounds,
+  readableBounds,
+  resizedBounds,
+  revealBounds,
+  viewScale,
   readSettings,
   textareaDiagnosticRange,
   zoomBounds,
@@ -60,7 +66,7 @@ class TestNode {
 const document = {
   createElementNS(namespace: string, tag: string) {
     assert.equal(namespace, SVG_NAMESPACE);
-    assert.ok(["svg", "rect", "line", "g", "defs", "clipPath", "text"].includes(tag));
+    assert.ok(["svg", "rect", "line", "g", "defs", "clipPath", "text", "desc"].includes(tag));
     return new TestNode(namespace, tag);
   },
 } as unknown as Document;
@@ -163,11 +169,15 @@ test("gap glyphs use only shared positioned primitives and never become selectab
     assert.equal(marker.children[1]?.attributes.get("y2"), "14");
     assert.equal(marker.children[1]?.attributes.get("stroke"), "#606060");
   }
-  const legend = all.filter((node) => node.tag === "text" && node.textContent.startsWith("//"));
-  assert.equal(legend.length, 1);
-  assert.equal(legend[0]?.attributes.get("x"), "528");
-  assert.equal(legend[0]?.attributes.get("y"), "131");
-  assert.equal(legend[0]?.attributes.get("textLength"), "200");
+  assert.equal(
+    all.filter((node) => node.tag === "text" && node.textContent.startsWith("//")).length,
+    0,
+  );
+  const description = all.filter((node) => node.tag === "desc");
+  assert.equal(description.length, 1);
+  assert.equal(description[0]?.textContent, "// Compressed address gaps");
+  assert.equal(description[0]?.children.length, 0);
+  assert.equal(tree.attributes.get("aria-describedby"), "address-layout-description");
   const bounded = render(
     { ...scene, gaps: { ...gaps, offsets: Array.from({ length: 2000 }, (_, i) => i) } },
     [],
@@ -185,6 +195,56 @@ test("gap glyphs use only shared positioned primitives and never become selectab
     assert.ok(rendered.every((node) => node.attributes.get("data-kind") !== "address-gap"));
     assert.ok(rendered.every((node) => !node.textContent.startsWith("//")));
   }
+});
+
+test("heap lanes retain their identity without painting a misleading enclosing rectangle", () => {
+  const lane = nodes(render()).find((node) => node.attributes.get("id") === "lane-0")!;
+  assert.equal(lane.tag, "g");
+  assert.equal(lane.attributes.get("data-runtime"), "0");
+  assert.equal(lane.attributes.get("data-heap"), "2");
+  assert.equal(lane.attributes.has("stroke"), false);
+  assert.equal(lane.children.length, 0);
+});
+
+test("pin camera starts with readable text and preserves pixel scale through pane resizing", () => {
+  const pin: SceneElement = {
+    ...element,
+    layer: 5,
+    geometry: { kind: "line", start: { x: 1000, y: 56 }, finish: { x: 1000, y: 72 } },
+    bounds: { x: 1000, y: 56, width: 0, height: 16 },
+    text: { ...element.text!, bounds: { x: 600, y: 57, width: 392, height: 14 } },
+  };
+  const original = structuredClone(pin);
+  const large = { ...bounds, height: 50000 };
+  const viewport = { width: 840, height: 280 };
+  const camera = initialBounds(large, [pin], viewport);
+  assert.deepEqual(camera, { x: 584, y: 0, width: 840, height: 280 });
+  assert.equal(
+    Math.min(viewport.width / camera.width, viewport.height / camera.height) * pin.text!.fontSize,
+    12,
+  );
+  const next = { width: 620, height: 320 };
+  const resized = resizedBounds(camera, viewport, next);
+  assert.equal(
+    Math.min(next.width / resized.width, next.height / resized.height) * pin.text!.fontSize,
+    12,
+  );
+  const farAway = { x: 820, y: 49000, width: 420, height: 28 };
+  const revealed = revealBounds(resized, farAway);
+  assert.ok(revealed.x <= farAway.x && revealed.x + revealed.width >= farAway.x + farAway.width);
+  assert.ok(revealed.y <= farAway.y && revealed.y + revealed.height >= farAway.y + farAway.height);
+  assert.equal(revealed.width, resized.width);
+  assert.equal(revealed.height, resized.height);
+  assert.equal(viewScale(camera, viewport), 1);
+  assert.ok(viewScale(camera, viewport) / viewScale(large, viewport) > 100);
+  assert.deepEqual(elementBounds(pin), { x: 600, y: 56, width: 400, height: 16 });
+  assert.deepEqual(pin, original, "Camera changes must not relayout or mutate worker primitives.");
+  assert.deepEqual(initialBounds(bounds, [element], viewport), fittedBounds(bounds));
+  assert.deepEqual(fittedBounds(large), large, "Explicit Fit must remain available.");
+  assert.throws(() => readableBounds(large, [pin], { width: 0, height: 0 }), /viewport/);
+  const veryTallPin = { ...pin, text: { ...pin.text!, bounds: { ...pin.text!.bounds, y: 2048 } } };
+  const tallCamera = readableBounds(large, [veryTallPin], viewport);
+  assert.equal(tallCamera.y, 2032);
 });
 
 test("uint64 inputs are canonicalized losslessly and invalid ranges are rejected", () => {
