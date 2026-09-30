@@ -241,8 +241,13 @@ No font is bundled, downloaded or redistributed; no third-party font license or
 font embedding dependency is introduced. SVG requests generic `monospace`, uses
 12-unit editable text, and forces each line's declared width with `textLength`
 and `lengthAdjust="spacingAndGlyphs"`. Cells are 8 units wide; line height is 14,
-baseline is 11 units below the line top. Labels wrap at 64 cells with at most two
-lines. There is no browser canvas/font measurement or platform-dependent reflow.
+baseline is 11 units below the line top. **Only OuterLeft PIN labels** wrap at
+32 cells with at most four lines: the same 128-character ASCII label fits in a
+256-unit-wide, 56-unit-high allocation without content loss or smaller fonts.
+This fits narrow desktop canvases at 1:1 scale; shared pin rows incorporate the
+full text height. BOX labels and InnerCenter PIN labels retain 64 cells by two
+lines (up to 512 by 28 units). There is no browser canvas/font measurement or
+platform-dependent reflow.
 
 InnerCenter centers the text bounds on the rectangle or PIN marker; OuterLeft
 places the right edge eight units left of the target. Both are vertically
@@ -253,7 +258,7 @@ InnerCenter pins can still produce overlapping labels; OuterLeft labeled pins
 instead use the shared rows described above.
 
 Printable ASCII is retained. CRLF is one explicit line break; bare CR/LF break
-lines. A break at the 64-cell boundary does not insert a second break; a trailing
+lines. A break at the selected 32/64-cell boundary does not insert a second break; a trailing
 break terminates the current line without allocating another empty line.
 Tab becomes one space. Every other control, DEL, non-ASCII UTF-16 unit and
 unpaired surrogate becomes visible `?`; a surrogate pair becomes `??`.
@@ -308,15 +313,15 @@ retained. Review intentional residual structure before sharing an export.
 
 All limits are positive, may only be lowered, and are shared across statements.
 
-| Limit                   | Default / ceiling | Exact accounting                                                                  |
-| ----------------------- | ----------------: | --------------------------------------------------------------------------------- |
-| MaxDirectives           |              4096 | Input directive inspections, including empty or clipped-out intervals             |
-| MaxElements             |              4096 | Admitted visible directive composites                                             |
-| MaxLanes                |                64 | Distinct admitted runtime/heap lanes                                              |
-| MaxLabelCharacters      |               128 | UTF-16 input units inspected per unredacted label; also at most two 64-cell lines |
-| MaxTotalLabelCharacters |             65536 | Sum of inspected label units after the per-label cap; redacted labels cost zero   |
-| MaxElapsedMilliseconds  |              5000 | Exclusive cooperative scene deadline                                              |
-| SvgLimits.MaxBytes      |           8388608 | Actual UTF-8 bytes accepted by the output stream                                  |
+| Limit                   | Default / ceiling | Exact accounting                                                                                                  |
+| ----------------------- | ----------------: | ----------------------------------------------------------------------------------------------------------------- |
+| MaxDirectives           |              4096 | Input directive inspections, including empty or clipped-out intervals                                             |
+| MaxElements             |              4096 | Admitted visible directive composites                                                                             |
+| MaxLanes                |                64 | Distinct admitted runtime/heap lanes                                                                              |
+| MaxLabelCharacters      |               128 | UTF-16 input units inspected per unredacted label; OuterLeft PIN: four 32-cell lines, otherwise two 64-cell lines |
+| MaxTotalLabelCharacters |             65536 | Sum of inspected label units after the per-label cap; redacted labels cost zero                                   |
+| MaxElapsedMilliseconds  |              5000 | Exclusive cooperative scene deadline                                                                              |
+| SvgLimits.MaxBytes      |           8388608 | Actual UTF-8 bytes accepted by the output stream                                                                  |
 
 The builder does not call `List.length`, sort, copy labels or walk the entire
 input before admission. Even a manually constructed huge QueryResult has only
@@ -325,7 +330,8 @@ Bounds discovery/sorting operate on at most MaxElements already-admitted items.
 Compact union construction and exact prefix calculations are similarly bounded;
 guards run before/after sorting and throughout merging, pin row partitioning,
 lane translation and positioning.
-Each element contains one rectangle/line plus at most one two-line label; SVG
+Each element contains one rectangle/line plus at most one label (up to four
+lines for OuterLeft PIN, two otherwise); SVG
 adds fixed-size groups/clips and at most MaxLanes inert metadata groups. This also bounds
 primitive/DOM overhead and text work, not just final array length. The writer
 streams through a byte-counting wrapper rather than building a giant XML string.

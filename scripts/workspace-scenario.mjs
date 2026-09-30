@@ -136,9 +136,16 @@ const layout = async (value) => {
   })()`);
 };
 const runQuery = async () => {
+  const ready = () =>
+    evaluate(`(() => {
+    const button = document.querySelector('[data-testid="run-query"]');
+    return Boolean(button && !button.disabled);
+  })()`);
+  await wait(ready, "Run query did not become available.");
   const count = queryResults.length;
   await click("Run query");
   await wait(() => queryResults.length === count + 1, "MQL did not execute.");
+  await wait(ready, "Query result and scene pages were not applied to the workspace.");
   return queryResults[count];
 };
 const cancelAfterCommit = async () => {
@@ -161,6 +168,7 @@ async function run() {
     await app.whenReady();
     await wait(() => BrowserWindow.getAllWindows().length > 0, "Workspace window was not created.");
     window = BrowserWindow.getAllWindows()[0];
+    window.setSize(900, 640);
     await wait(() => !window.webContents.isLoading(), "Workspace assets did not load.");
     await wait(
       () => evaluate(`Boolean(window.workspace && document.querySelector("textarea"))`),
@@ -367,6 +375,48 @@ async function run() {
       () => evaluate(`document.querySelectorAll("svg rect").length > 0`),
       "Recovery scene was not rendered.",
     );
+    const longLabel = "LongNamespace.".repeat(9) + "XX";
+    assert.equal(longLabel.length, 128);
+    await editor(
+      'MATCH (obj: Object) WHERE obj.Type = "MemoryVisualizer.DumpFixture.DuplicatePayload" ' +
+        `RETURN obj AS PIN (Label = "${longLabel}", LabelPosition = OuterLeft, Background = Blue);`,
+    );
+    const longPins = await runQuery();
+    assert.equal(longPins.status, "complete");
+    await wait(
+      () =>
+        evaluate(
+          `document.querySelectorAll('svg [data-element-id]').length === ${longPins.scene.elementCount}`,
+        ),
+      "Long-label pin scene was not rendered.",
+    );
+    const longMetrics = await evaluate(`(() => {
+      const svg = document.querySelector('svg[data-scene-version]');
+      const viewport = document.querySelector('[data-testid="memory-diagram"]').getBoundingClientRect();
+      const scale = Math.hypot(svg.getScreenCTM().c, svg.getScreenCTM().d);
+      const groups = [...svg.querySelectorAll('[data-element-id]')];
+      const text = [...svg.querySelectorAll('[data-element-id] text')];
+      return {viewportWidth:viewport.width, labels:groups.length,
+        lines:groups.map(group => [...group.querySelectorAll('text')].map(t=>t.textContent)),
+        font:Math.min(...text.map(t=>Number(t.getAttribute('font-size'))*scale)),
+        fullyVisible:text.filter(t=>{const b=t.getBoundingClientRect();
+          return b.left>=viewport.left&&b.right<=viewport.right&&b.top>=viewport.top&&b.bottom<=viewport.bottom;}).length};
+    })()`);
+    assert.ok(
+      longMetrics.viewportWidth < 512,
+      "Long-label regression needs a genuinely narrow canvas.",
+    );
+    assert.ok(longMetrics.labels > 0);
+    assert.ok(longMetrics.font >= 11.5);
+    assert.ok(
+      longMetrics.fullyVisible > 0,
+      `No long label is readable in the narrow canvas: ${JSON.stringify(longMetrics)}`,
+    );
+    for (const lines of longMetrics.lines) {
+      assert.equal(lines.join(""), longLabel, "Wrapping must preserve every label character.");
+      assert.equal(lines.length, 4);
+      assert.ok(lines.every((line) => line.length <= 32));
+    }
     const pinQuery =
       "MATCH (obj: Object) WHERE obj.IsFree = false " +
       "RETURN obj.Address, obj.Size, obj.Type AS PIN " +
@@ -440,7 +490,9 @@ async function run() {
       const scale = Math.hypot(matrix.c, matrix.d);
       return {overlaps, labels:boxes.length, visible:visible.length,
         smallestFont:Math.min(...texts.map(text => Number(text.getAttribute("font-size")) * scale)),
-        width:svg.viewBox.baseVal.width,height:svg.viewBox.baseVal.height};
+        width:svg.viewBox.baseVal.width,height:svg.viewBox.baseVal.height,
+        viewport: {width:viewport.width,height:viewport.height},
+        topLabels: texts.map(text => text.getBoundingClientRect().toJSON()).sort((a,b)=>a.top-b.top).slice(0,3)};
     })()`);
     await wait(
       async () => (await pinMetrics()).smallestFont >= 11.5,
@@ -448,16 +500,19 @@ async function run() {
     );
     let metrics = await pinMetrics();
     assert.equal(metrics.overlaps, 0, "OuterLeft pin labels overlap.");
-    assert.ok(metrics.labels > 1 && metrics.visible > 0);
+    assert.ok(
+      metrics.labels > 1 && metrics.visible > 0,
+      `No fully visible pin labels: ${JSON.stringify(metrics)}`,
+    );
     const originalSize = window.getSize();
     const originalViewport = await evaluate(
       `document.querySelector('[data-testid="memory-diagram"]').clientWidth`,
     );
-    window.setSize(originalSize[0] - 100, originalSize[1]);
+    window.setSize(originalSize[0] + 320, originalSize[1]);
     await wait(
       () =>
         evaluate(
-          `document.querySelector('[data-testid="memory-diagram"]').clientWidth < ${originalViewport}`,
+          `document.querySelector('[data-testid="memory-diagram"]').clientWidth > ${originalViewport}`,
         ),
       "Window resizing did not resize the drawing viewport.",
     );

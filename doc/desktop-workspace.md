@@ -87,6 +87,9 @@ background. Compact break marks remain; their description is accessible without
 repeating captions over the drawing.
 
 OuterLeft pin labels use deterministic separate rows in the shared engine.
+They wrap at 32 monospace cells over at most four lines, preserving the existing
+128-character budget while fitting a narrow supported drawing pane at readable
+scale. Other diagram labels keep their existing typography.
 Pins retain their exact horizontal address positions and source identities;
 neither labels nor objects are silently dropped. Dense labeled-pin scenes start
 at readable scale, with pan/zoom to explore the remaining rows. **Readable

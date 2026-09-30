@@ -22,8 +22,19 @@ let private token = CancellationToken.None
 let private id =
     SnapshotId.create (Guid.Parse "fc644f7b-cf63-4c20-82fa-7efea63e09e1") |> unwrap
 
+type private Clock() =
+    inherit TimeProvider()
+    member val Timestamp = 0L with get, set
+    override _.TimestampFrequency = 1000L
+    override this.GetTimestamp() = this.Timestamp
+
 let private runtime index : RuntimeIdentity = { SnapshotId = id; Index = index }
-let private context () = SceneExecutionContext.create token
+
+// Geometry assertions are independent of host scheduling; deadline tests advance their own clock.
+let private context () = {
+    SceneExecutionContext.create token with
+        TimeProvider = Clock()
+}
 
 let private directive runtimeIndex heap address size : DrawingDirective = {
     StatementIndex = 0
@@ -547,11 +558,10 @@ let ``Explicit newline at cell boundary does not insert a spurious third line`` 
 
     Assert.Equal<string list>([ first; "B" ], value.Elements.Head.Text.Value.Lines |> List.map _.Text)
 
-type private Clock() =
-    inherit TimeProvider()
-    member val Timestamp = 0L with get, set
-    override _.TimestampFrequency = 1000L
-    override this.GetTimestamp() = this.Timestamp
+[<Fact>]
+let ``Production scene context still uses the system clock and the five second ceiling`` () =
+    Assert.Same(TimeProvider.System, (SceneExecutionContext.create token).TimeProvider)
+    Assert.Equal(5000, SceneLimits.defaults.MaxElapsedMilliseconds)
 
 [<Theory>]
 [<InlineData(9L, false)>]
@@ -596,7 +606,8 @@ let ``Cancellation and staleness discard even already built geometry`` stale =
     let mutable checks = 0
 
     let ctx = {
-        SceneExecutionContext.create cancellation.Token with
+        context () with
+            CancellationToken = cancellation.Token
             IsSnapshotCurrent =
                 fun _ ->
                     checks <- checks + 1
@@ -1117,6 +1128,66 @@ let ``Compact maximum marker counts reserve at least eighty percent for globally
     Assert.Single markers.Legend.Lines |> ignore
 
 [<Theory>]
+[<InlineData(4999L, false)>]
+[<InlineData(5000L, true)>]
+let ``Maximum compact geometry honors the injected deadline even at its final checkpoint`` elapsed stopped =
+    let count = SceneLimits.defaults.MaxElements
+
+    let options = {
+        compactOptions with
+            Viewport =
+                Some {
+                    Start = 0UL
+                    Size = uint64 (count * 2 + 1)
+                }
+    }
+
+    let input =
+        query [
+            for index in 0 .. count - 1 -> directive 0 (index % 64) (uint64 (index * 2 + 1)) 1UL
+        ]
+
+    let mutable checkpoints = 0
+
+    let baselineContext = {
+        context () with
+            IsSnapshotCurrent =
+                fun _ ->
+                    checkpoints <- checkpoints + 1
+                    true
+    }
+
+    let expected = Scene.build options input baselineContext |> scene
+    let clock = Clock()
+    let mutable checks = 0
+
+    let deadlineContext = {
+        context () with
+            TimeProvider = clock
+            IsSnapshotCurrent =
+                fun _ ->
+                    checks <- checks + 1
+
+                    if checks = checkpoints then
+                        clock.Timestamp <- elapsed
+
+                    true
+    }
+
+    let actual = Scene.build options input deadlineContext
+    Assert.Equal(checkpoints, checks)
+
+    if stopped then
+        Assert.Equal(SceneStatus.Truncated [ SceneTruncation.ElapsedTime ], actual.Status)
+        Assert.True actual.Scene.IsNone
+    else
+        let value = scene actual
+        Assert.Equal(expected.Bounds, value.Bounds)
+        Assert.Equal<SceneLane list>(expected.Lanes, value.Lanes)
+        Assert.Equal<SceneElement list>(expected.Elements, value.Elements)
+        Assert.Equal(expected.Gaps, value.Gaps)
+
+[<Theory>]
 [<InlineData("directives")>]
 [<InlineData("elements")>]
 [<InlineData("lanes")>]
@@ -1431,6 +1502,114 @@ let ``Single OuterLeft pin preserves its original tick center and all text remai
     close 528.0 pin.Bounds.X
     close (pin.Bounds.X - 8.0) (pin.Text.Value.Bounds.X + pin.Text.Value.Bounds.Width)
     close (pin.Bounds.Y + 8.0) (pin.Text.Value.Bounds.Y + pin.Text.Value.Bounds.Height / 2.0)
+    assertContained value
+
+[<Fact>]
+let ``OuterLeft PIN fits all 128 ASCII characters in four readable narrow lines without overlap`` () =
+    let lines = [ for letter in [ "A"; "B"; "C"; "D" ] -> String.replicate 32 letter ]
+    let raw = String.concat "" lines
+    let value = draw [ labeledPin 0 0 100UL raw; labeledPin 0 0 100UL raw ]
+
+    for pin in value.Elements do
+        let text = pin.Text.Value
+        Assert.Equal<string list>(lines, text.Lines |> List.map _.Text)
+        Assert.Equal(raw, text.Lines |> List.map _.Text |> String.concat "")
+        Assert.False text.IsTruncated
+        close 256.0 text.Bounds.Width
+        close 56.0 text.Bounds.Height
+        close 12.0 text.FontSize
+        close 8.0 text.CellWidth
+        close 14.0 text.LineHeight
+        close (pin.Bounds.X - 8.0) (text.Bounds.X + text.Bounds.Width)
+        close (pin.Bounds.Y + pin.Bounds.Height / 2.0) (text.Bounds.Y + text.Bounds.Height / 2.0)
+
+    close
+        8.0
+        (value.Elements[1].Text.Value.Bounds.Y
+         - value.Elements[0].Text.Value.Bounds.Y
+         - 56.0)
+
+    assertSeparated value.Elements[0] value.Elements[1]
+    assertContained value
+    let ns = XNamespace.Get "http://www.w3.org/2000/svg"
+    let output = XDocument.Parse(svg value)
+    Assert.Equal(8, output.Descendants(ns + "text") |> Seq.length)
+
+[<Theory>]
+[<InlineData("box-outer")>]
+[<InlineData("box-inner")>]
+[<InlineData("pin-inner")>]
+let ``BOX and InnerCenter PIN retain the existing 64 by two typography`` kind =
+    let item = {
+        labeledPin 0 0 100UL (String.replicate 128 "X") with
+            Kind =
+                if kind = "pin-inner" then
+                    DrawingKind.Pin
+                else
+                    DrawingKind.Box
+            LabelPosition =
+                if kind = "box-outer" then
+                    LabelPosition.OuterLeft
+                else
+                    LabelPosition.InnerCenter
+    }
+
+    let value = draw [ item ]
+    let text = value.Elements.Head.Text.Value
+    Assert.Equal<string list>([ String.replicate 64 "X"; String.replicate 64 "X" ], text.Lines |> List.map _.Text)
+    close 512.0 text.Bounds.Width
+    close 28.0 text.Bounds.Height
+    Assert.False text.IsTruncated
+    assertContained value
+
+[<Theory>]
+[<InlineData("\n")>]
+[<InlineData("\r")>]
+[<InlineData("\r\n")>]
+let ``OuterLeft PIN hard breaks at 32 cells preserve four lines and ignore a trailing break`` newline =
+    let lines = [
+        String.replicate 32 "A"
+        String.replicate 32 "B"
+        String.replicate 32 "C"
+        "D"
+    ]
+
+    for trailing in [ ""; newline ] do
+        let raw = String.concat newline lines + trailing
+        let value = draw [ labeledPin 0 0 100UL raw ]
+        let text = value.Elements.Head.Text.Value
+        Assert.Equal<string list>(lines, text.Lines |> List.map _.Text)
+        close 256.0 text.Bounds.Width
+        close 56.0 text.Bounds.Height
+        Assert.False text.IsTruncated
+        assertContained value
+
+[<Theory>]
+[<InlineData("characters")>]
+[<InlineData("lines")>]
+let ``OuterLeft PIN keeps character and hard line truncation explicit at unchanged caps`` overflow =
+    let raw =
+        if overflow = "characters" then
+            String.replicate 129 "X"
+        else
+            "A\nB\nC\nD\nE"
+
+    let result = build SceneOptions.defaults (query [ labeledPin 0 0 100UL raw ])
+    Assert.Equal(SceneStatus.Truncated [ SceneTruncation.LabelCharacters ], result.Status)
+    let value = result.Scene.Value
+    let text = value.Elements.Head.Text.Value
+    Assert.True text.IsTruncated
+    Assert.Equal(4, text.Lines.Length)
+    Assert.All(text.Lines, fun line -> Assert.InRange(line.Text.Length, 1, 32))
+
+    Assert.Equal(
+        (if overflow = "characters" then
+             String.replicate 128 "X"
+         else
+             "ABCD"),
+        text.Lines |> List.map _.Text |> String.concat ""
+    )
+
     assertContained value
 
 [<Fact>]

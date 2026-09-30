@@ -668,8 +668,17 @@ module Scene =
                                 if count = 0 then
                                     None
                                 else
+                                    let cellsPerLine, maxLines =
+                                        if
+                                            directive.Kind = DrawingKind.Pin
+                                            && directive.LabelPosition = LabelPosition.OuterLeft
+                                        then
+                                            32, 4
+                                        else
+                                            64, 2
+
                                     let lines = ResizeArray<string>()
-                                    let current = StringBuilder(64)
+                                    let current = StringBuilder(cellsPerLine)
                                     let mutable position = 0
                                     let mutable replaced = 0
 
@@ -684,7 +693,7 @@ module Scene =
                                             if ch = '\r' && position + 1 < count && raw[position + 1] = '\n' then
                                                 position <- position + 1
                                         else
-                                            if current.Length = 64 then
+                                            if current.Length = cellsPerLine then
                                                 lines.Add(current.ToString())
                                                 current.Clear() |> ignore
 
@@ -705,12 +714,12 @@ module Scene =
                                     if current.Length > 0 then
                                         lines.Add(current.ToString())
 
-                                    let truncated = raw.Length > count || lines.Count > 2
+                                    let truncated = raw.Length > count || lines.Count > maxLines
 
-                                    if lines.Count > 2 then
+                                    if lines.Count > maxLines then
                                         reason SceneTruncation.LabelCharacters
 
-                                    let shown = lines |> Seq.truncate 2 |> Seq.toList
+                                    let shown = lines |> Seq.truncate maxLines |> Seq.toList
 
                                     let width =
                                         shown |> List.map (fun line -> float line.Length * 8.0) |> List.fold max 0.0
