@@ -2,9 +2,18 @@
 
 MemoryVisualizer is being rebuilt as a local-first, cross-platform tool for turning .NET memory into reproducible, publication-quality diagrams. The architecture is F#/.NET 11 analysis and scene computation, a headless CLI, and a TypeScript/Electron desktop shell. See the [roadmap (#5)](https://github.com/kkokosa/MemoryVisualizer/issues/5).
 
-**Implemented now:** the [#6](https://github.com/kkokosa/MemoryVisualizer/issues/6) foundation, [#7](https://github.com/kkokosa/MemoryVisualizer/issues/7) bounded worker protocol, [#8](https://github.com/kkokosa/MemoryVisualizer/issues/8) native dump snapshot adapter and CLI summary, the **visual-first M1 slice of [#10](https://github.com/kkokosa/MemoryVisualizer/issues/10)** (indexed snapshot store), the **bounded M1 slice of [#11](https://github.com/kkokosa/MemoryVisualizer/issues/11)** (MQL parser, typed planner/executor and native query CLI), and the **headless visual-first M1 slice of [#12](https://github.com/kkokosa/MemoryVisualizer/issues/12)** (shared positioned scenes, address-aligned composition and native standalone SVG export). Snapshots include memory maps, reference edges, roots, and handle metadata. The Electron shell and v1 worker protocol still use their explicit **fake backend**, not the new adapter/store/query/scene libraries. **Not implemented:** MQL reference traversal/root-path algorithms, real desktop rendering/import/interactivity, other export formats, packaging, or the desktop workspace UX. Full #10 backend comparison, measured ADR and large benchmarks remain deferred; managed indexes are provisional. Full #11 also requires M2 and real worker integration. **Full #12 remains open** until desktop acceptance through #13 is implemented. The old WPF/FsXaml application and Neo4j/Java/Paket startup dependencies have been removed rather than ported.
+**Implemented now:** the foundation (#6), bounded worker lifecycle (#7), native dump extraction (#8), provisional indexed snapshot store (M1 #10), bounded MQL (M1 #11), shared positioned scenes/SVG (M1 #12), and the **visual-first native desktop workspace (M1 #13)**. The [desktop guide](doc/desktop-workspace.md) covers native dump selection and DAC trust, React's three-pane editor/diagram/inspector, bounded result pages, interactive shared SVG, versioned recipes, crash recovery and an assembled folder with a self-contained worker. Native protocol v3 is separate from the retained explicit synthetic v1 test shell. **Deferred:** MQL graph/reference traversal and advanced language services, backend comparisons/benchmarks, infinite canvases, other export formats, and #15 installers/signing/updates. Four-host verification remains the platform acceptance gate; an assembled development folder is not a signed release. The old WPF/FsXaml application and Neo4j/Java/Paket startup dependencies have been removed rather than ported.
 
 ## Quick start
+
+For the desktop workflow, build with `npm ci` then `npm run build:workspace`
+using the pinned build tools below. Launch the executable/app in
+`artifacts/workspace-<host-RID>`; the assembled folder needs no developer SDK,
+Node installation or terminal at runtime. The exact matching trusted DAC for a
+dump is still required. See [desktop build, usage and trust policy](doc/desktop-workspace.md).
+New desktop scenes use a compact address overview with explicit gap markers;
+select Linear for true address spacing. Both mappings come from the shared
+engine. Existing version 1 recipes reopen in linear mode; new saves use version 2.
 
 Install these exact tools:
 
@@ -43,7 +52,7 @@ dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore
 dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore -- --version
 ```
 
-No arguments also prints help and exits. Unsupported arguments return exit code `2`, write a diagnostic to stderr, and leave stdout empty. Help/version return `0`. Only the worker's explicit `--protocol --backend=fake` invocation starts the stdio protocol; ordinary help/version commands never wait for stdin.
+No arguments also prints help and exits. Unsupported arguments return exit code `2`, write a diagnostic to stderr, and leave stdout empty. Help/version return `0`. The worker's explicit `--protocol --backend=fake` starts synthetic v1; `--protocol --backend=native` starts real v3. Ordinary help/version commands never wait for stdin.
 
 For an offline native snapshot summary, use an explicit dump and an **absolute trusted DAC path from the exact target runtime build**:
 
@@ -53,7 +62,7 @@ dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore
 
 On Linux/macOS substitute the matching `libmscordaccore.so`/`libmscordaccore.dylib` absolute path. Omit `--memory-map-only` to include reference/root/handle counts. Output is bounded JSON without object/string payloads; all counts use decimal strings. Exit codes: `0` complete, `3` usable partial (read diagnostics), `2` failure/invalid arguments, `130` cancellation. The public F# `IHeapSnapshotReader` provides the full materialized data. See [snapshot extraction and compatibility](doc/snapshots.md) for DAC trust, limits, completeness, and support restrictions.
 
-`IndexedHeapSnapshot.Create` consumes that materialized snapshot without native handles. It provides exact scoped object/type lookup and deterministic bounded selection by runtime, heap, segment, generation, heap kind, type, free/allocated entries, and half-open address ranges. See the [provisional indexed-store contract](doc/indexed-snapshots.md) for ownership, interval overlap versus starts-in-range, pagination, partial input, limits, cancellation, and disposal. Native query and scene export use this API; desktop import remains deferred.
+`IndexedHeapSnapshot.Create` consumes that materialized snapshot without native handles. It provides exact scoped object/type lookup and deterministic bounded selection by runtime, heap, segment, generation, heap kind, type, free/allocated entries, and half-open address ranges. See the [provisional indexed-store contract](doc/indexed-snapshots.md) for ownership, interval overlap versus starts-in-range, pagination, partial input, limits, cancellation, and disposal. Native CLI and desktop v3 use this same API.
 
 For native MQL, use `query` instead of `inspect` and pass `--query "MATCH (o:Object) RETURN o.Address,o.Size"` along with the dump path and trusted DAC options. This returns versioned JSON rows and drawing instructions, **not SVG**. `--max-results`, `--max-directives`, `--max-candidates` and `--max-elapsed-ms` may lower the defaults. Exit codes are `0` complete, `3` source-partial or query-truncated, `2` failure, `130` cancellation. The [MQL specification](doc/mql.md) defines syntax, typed properties, explicit runtime/heap DRAW lanes, source spans, shared budgets, the public F# API and CLI JSON contract.
 
@@ -63,7 +72,7 @@ For a standalone vector diagram, use `export <dump> --query <MQL> --output <new.
 dotnet run --project src/MemoryVisualizer.Cli -c Release --no-build --no-restore -- export example.dmp --dac C:\trusted-runtime\mscordaccore.dll --query "MATCH (g:Generation) RETURN g AS BOX(Label=g.Generation,Background=Blue,Width=24)" --output generations.svg
 ```
 
-The [scene contract and architecture decision](doc/scenes.md) specify the shared positioned API, exact uint64-safe geometry, explicit runtime/heap lanes, ASCII mono-cell typography and offline font differences, redaction, viewport and processing/output budgets. Export never overwrites. It publishes atomically only for complete/nonpartial results: exit `3` means **no SVG** for partial/truncated output, unlike query's usable partial JSON. `--redact-addresses` also removes address-derived widths/gaps by using a schematic layout, rather than only hiding text. Desktop real import/rendering remains #13; neither protocol v1 nor its fake renderer has been changed.
+The [scene contract and architecture decision](doc/scenes.md) specify the shared positioned API, exact uint64-safe geometry, explicit runtime/heap lanes, ASCII mono-cell typography and offline font differences, redaction, viewport and processing/output budgets. Export never overwrites. It publishes atomically only for complete/nonpartial results: exit `3` means **no SVG** for partial/truncated output, unlike query's usable partial JSON. `--redact-addresses` also removes address-derived widths/gaps by using a schematic layout, rather than only hiding text. Desktop v3 consumes these positions and uses the same exporter; synthetic protocol v1 remains unchanged. CLI exports default to linear spacing; pass `--layout compact` to reproduce the new desktop overview, together with the same viewport and limits.
 
 `npm run smoke` executes both DLL and native apphost forms of both programs, checking actual exit codes, stdout/stderr, help/version aliases, invalid arguments, and output paths. It defaults to `Release`; set `CONFIGURATION=Debug` to check a Debug build. Set `RUNTIME_IDENTIFIER` to the host RID after a RID-specific build. These are environment variables (use `$env:NAME = "value"` in PowerShell).
 
@@ -73,7 +82,7 @@ Ordinary NuGet `PackageReference` plus committed `packages.lock.json` files pin 
 
 The RC SDK bundles FSharp.Core packages with different Windows/Linux content hashes despite the same version. `DisableImplicitLibraryPacksFolder` deliberately disables that SDK-local package feed so all platforms restore the canonical nuget.org package and share identical lock hashes. This is an observed prerelease reproducibility gap, not a framework retarget or relaxed lock check.
 
-The root npm workspace owns the single `package-lock.json`; run npm commands from the root, not a separate desktop install. TypeScript `7.0.2`, Electron `44.4.2`, and Prettier `3.9.8` are exact pins. `.npmrc` still disables dependency lifecycle scripts. `npm run electron:install` explicitly allowlists only the pinned Electron package's official runtime installer (including its checksum verification); it does not enable arbitrary install scripts. `npm run build:desktop` compiles main, the single-file sandbox-compatible preload, and tests. React/Vite/workspace UX and packaging remain in [#13](https://github.com/kkokosa/MemoryVisualizer/issues/13) and [#15](https://github.com/kkokosa/MemoryVisualizer/issues/15).
+The root npm workspace owns the single `package-lock.json`; run npm commands from the root, not a separate desktop install. TypeScript `7.0.2`, Electron `44.4.2`, Prettier `3.9.8`, React/ReactDOM `19.3.0` and Vite `8.3.1` are exact pins. `.npmrc` disables dependency lifecycle scripts. `npm run electron:install` explicitly allowlists only the pinned Electron package's official runtime installer (including checksum verification). `npm run build:desktop` compiles main, sandbox-compatible preloads and tests, and bundles all renderer assets locally. `npm run build:workspace` additionally assembles Electron and a self-contained host-RID worker. Release packaging remains #15.
 
 ### Worker bridge and synthetic test shell
 
@@ -87,14 +96,14 @@ progress is coalesced, and stalled peers have finite deadlines. uint64 values
 remain canonical strings, including `18446744073709551615`.
 
 After building the solution and desktop and explicitly installing Electron,
-launch `node_modules/.bin/electron desktop` (PowerShell:
-`.\node_modules\.bin\electron.cmd desktop`). The test shell can load, cancel,
+launch `node_modules/.bin/electron desktop --fixture` (PowerShell:
+`.\node_modules\.bin\electron.cmd desktop --fixture`). The explicit test shell can load, cancel,
 and dispose a synthetic fixture. It cannot select files, analyze dumps, run MQL,
 or produce a real export. Main spawns the explicit native apphost with separate
 arguments and `shell: false`; there is no server and no Node utility-process
 substitution. `RUNTIME_IDENTIFIER` chooses an already built host-RID output.
-Release portable output is the default, and requires the pinned .NET runtime.
-Self-contained distribution is deliberately left to packaging work.
+Release portable output is the development default, and requires the pinned .NET
+runtime. The native workspace assembly instead bundles a self-contained worker.
 
 The renderer has no Node integration, raw IPC, process, filesystem, or arbitrary
 path API. Context isolation and the Chromium sandbox remain enabled. The preload
@@ -125,14 +134,14 @@ For an intentional dependency update, edit exact manifest versions, run `dotnet 
 | `src/MemoryVisualizer.Query`            | Bounded M1 MQL lexer/parser, typed selection/projection and separate presentation plans, snapshot-scoped executor. Core-only dependency; suitable for CLI and future real worker binding.                                          |
 | `src/MemoryVisualizer.Scene`            | Versioned immutable positioned scenes, shared address layout/styles/text/redaction, and bounded standalone SVG serialization. Query/Core-only dependencies; no competing renderer layout.                                          |
 | `src/MemoryVisualizer.Analysis.ClrMd`   | The only ClrMD reference. Explicit dump extraction, trusted DAC resolution, compatibility checks, bounded materialization, progress/cancellation, and typed errors/partial diagnostics. Only core types cross its public boundary. |
-| `src/MemoryVisualizer.Worker`           | Bounded v1 protocol host and deterministic fake backend; real analysis/query operations remain deferred.                                                                                                                           |
+| `src/MemoryVisualizer.Worker`           | Explicit synthetic v1 and native v3 hosts, bounded import/query/positioned-scene pages and shared atomic export in an owned process.                                                                                               |
 | `src/MemoryVisualizer.Cli`              | Offline native `inspect` summary, `query` rows/drawing instructions and atomic `export` standalone SVG, plus help/version. Not an IPC client.                                                                                      |
 | `src/Shared/CommandLine.fs`             | Shared hosting-only source linked into the executables and hosting tests; CLI concerns do not enter the core.                                                                                                                      |
 | `tests/MemoryVisualizer.Core.Tests`     | Contract, indexed-store, MQL grammar/type/span/budget/composition, scene geometry/redaction and deterministic SVG golden tests, with no adapter reference or native loading.                                                       |
 | `tests/MemoryVisualizer.Hosting.Tests`  | Argument handling, managed adapter loading/failures, and worker protocol coverage.                                                                                                                                                 |
 | `tests/MemoryVisualizer.Analysis.Tests` | Real generated-dump integration, offline DACs, memory maps, aliases/cycles/arrays/handles, bounded details, corruption, cancellation/disposal, and lossless summaries.                                                             |
 | `tests/MemoryVisualizer.DumpFixture`    | Controlled synthetic fixture child process; no production attach or historical dump access.                                                                                                                                        |
-| `desktop`                               | Typed worker owner, narrow preload API, synthetic sandboxed test shell, and native/Electron lifecycle tests.                                                                                                                       |
+| `desktop`                               | Native React workspace, typed bounded worker owner, trusted native dialogs, recipes, narrow sandboxed preload and synthetic/native Electron regression tests.                                                                      |
 
 `SnapshotId` is a nonempty UUID. The original DTO contracts retain distinct nonzero `ObjectId`, `TypeId`, and `SegmentId` values plus `ObjectReference` snapshot scope; they are not native handles. Extraction adds explicit `RuntimeIdentity` (snapshot UUID and discovered runtime index), `ObjectIdentity` (runtime and address), and `TypeIdentity` (runtime and method table). Equal type names never imply equal types. Identities do not survive a new capture/import; no cross-dump identity is promised.
 

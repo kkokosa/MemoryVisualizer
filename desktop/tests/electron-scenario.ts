@@ -30,10 +30,18 @@ export async function runElectronScenario(
     await window.webContents.executeJavaScript(`(() => {
       window.failureObserved = new Promise(resolve =>
         window.memoryVisualizer.onFailure(error => resolve(error.code)));
+      window.firstProgress = new Promise((resolve, reject) => {
+        const deadline = setTimeout(() => reject(Error("First progress deadline elapsed")), 5000);
+        const unsubscribe = window.memoryVisualizer.onProgress(() => {
+          clearTimeout(deadline);
+          unsubscribe();
+          resolve();
+        });
+      });
       window.pendingOutcome = window.memoryVisualizer.loadFixture(5000).result;
       return true;
     })()`);
-    await new Promise((done) => setTimeout(done, 50));
+    await window.webContents.executeJavaScript("window.firstProgress");
     const pid = worker.child.pid!;
     worker.child.kill("SIGKILL");
     const observed: unknown = await window.webContents.executeJavaScript(`(async () => {
@@ -63,9 +71,14 @@ export async function runElectronScenario(
     const denied = await api.query(null, "test", 129, null).result;
     if (denied.ok) throw Error("Invalid input accepted");
     let progress = 0;
-    const unsubscribe = api.onProgress(() => progress++);
-    const slow = api.loadFixture(1000);
-    await new Promise(r => setTimeout(r, 180));
+    let firstProgress;
+    const started = new Promise((resolve, reject) => {
+      const deadline = setTimeout(() => reject(Error("First progress deadline elapsed")), 5000);
+      firstProgress = () => { clearTimeout(deadline); resolve(); };
+    });
+    const unsubscribe = api.onProgress(() => { progress++; firstProgress(); });
+    const slow = api.loadFixture(5000);
+    await started;
     await api.cancel(slow.requestId);
     const cancelled = await slow.result;
     if (cancelled.ok || cancelled.error.code !== "Cancelled") throw Error("Cancellation failed");
@@ -107,11 +120,19 @@ export async function runElectronScenario(
     outsider.destroy();
   }
   await window.webContents.executeJavaScript(`(async () => {
+    const started = new Promise((resolve, reject) => {
+      const deadline = setTimeout(() => reject(Error("Current load progress deadline elapsed")), 5000);
+      const unsubscribe = window.memoryVisualizer.onProgress(() => {
+        clearTimeout(deadline);
+        unsubscribe();
+        resolve();
+      });
+    });
     document.getElementById("load").click();
     document.getElementById("load").click();
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await started;
     document.getElementById("cancel").click();
-    const deadline = performance.now() + 2000;
+    const deadline = performance.now() + 5000;
     while (document.getElementById("status").textContent !== "Request cancelled.") {
       if (performance.now() > deadline) throw Error("Older shell operation hid current cancellation");
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -119,8 +140,15 @@ export async function runElectronScenario(
   })()`);
   const pid = worker.child.pid;
   assert.ok(pid);
-  await window.webContents.executeJavaScript("window.memoryVisualizer.loadFixture(5000).requestId");
-  await new Promise((done) => setTimeout(done, 50));
+  await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(Error("Active work progress deadline elapsed")), 5000);
+    const unsubscribe = window.memoryVisualizer.onProgress(() => {
+      clearTimeout(deadline);
+      unsubscribe();
+      resolve();
+    });
+    window.memoryVisualizer.loadFixture(5000);
+  })`);
   console.log(`Owned worker PID: ${pid}`);
   // Exercise window-all-closed -> before-quit, with work still active.
   window.close();

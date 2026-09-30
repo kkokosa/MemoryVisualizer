@@ -14,7 +14,7 @@ exception private ExportFailure of string
 [<RequireQualifiedAccess>]
 module ExportCommand =
     let usage =
-        "export <dump-path> --query <MQL-text> --output <new.svg> [--dac <trusted-absolute-path>] [--cache <trusted-absolute-directory>] [--allow-network] [--view-start <uint64>] [--view-size <uint64>] [--plot-width <n>] [--redact-addresses] [--redact-strings] [--redact-paths] [--redact-labels] [--max-results <n>] [--max-directives <n>] [--max-candidates <n>] [--max-elapsed-ms <n>] [--max-scene-directives <n>] [--max-elements <n>] [--max-lanes <n>] [--max-label-chars <n>] [--max-total-label-chars <n>] [--max-scene-elapsed-ms <n>] [--max-svg-bytes <n>]"
+        "export <dump-path> --query <MQL-text> --output <new.svg> [--dac <trusted-absolute-path>] [--cache <trusted-absolute-directory>] [--allow-network] [--layout <linear|compact>] [--view-start <uint64>] [--view-size <uint64>] [--plot-width <n>] [--redact-addresses] [--redact-strings] [--redact-paths] [--redact-labels] [--max-results <n>] [--max-directives <n>] [--max-candidates <n>] [--max-elapsed-ms <n>] [--max-scene-directives <n>] [--max-elements <n>] [--max-lanes <n>] [--max-label-chars <n>] [--max-total-label-chars <n>] [--max-scene-elapsed-ms <n>] [--max-svg-bytes <n>]"
 
     let private fail message = raise (ExportFailure message)
 
@@ -72,6 +72,14 @@ module ExportCommand =
                 inspect.Add flag
                 inspect.Add(value ())
             | "--allow-network" -> inspect.Add flag
+            | "--layout" ->
+                let layout =
+                    match value () with
+                    | "linear" -> SceneLayout.Linear
+                    | "compact" -> SceneLayout.Compact
+                    | _ -> fail "--layout must be linear or compact."
+
+                sceneOptions <- { sceneOptions with Layout = layout }
             | "--redact-addresses" ->
                 sceneOptions <- {
                     sceneOptions with

@@ -51,7 +51,21 @@ for (const name of ["MemoryVisualizer.Worker", "MemoryVisualizer.Cli"]) {
           assert.ok(result.stdout.trim().startsWith(`${name} ${version}`), result.stdout);
         } else {
           assert.ok(result.stdout.includes(`Usage: ${name}`), result.stdout);
-          assert.match(result.stdout, /not implemented/);
+          if (name === "MemoryVisualizer.Worker") {
+            assert.match(result.stdout, /--protocol --backend=native/);
+            assert.match(result.stdout, /--protocol --backend=fake/);
+            assert.match(
+              result.stdout,
+              /Protocol v1 uses explicit synthetic fixtures; v3 uses the native shared engine\./,
+            );
+            assert.match(
+              result.stdout,
+              /Native dump analysis, bounded MQL, positioned scenes, and SVG export\./,
+            );
+            assert.doesNotMatch(result.stdout, /not implemented/);
+          } else {
+            assert.match(result.stdout, /not implemented/);
+          }
         }
       }
     }

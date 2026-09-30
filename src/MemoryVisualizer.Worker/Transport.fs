@@ -64,12 +64,13 @@ type FrameReader(input: Stream, ?frameTimeout: TimeSpan) =
         }
 
 /// There is no output queue; producers await both serialization and pipe backpressure.
-type FrameWriter(output: Stream, timeout: TimeSpan) =
+type FrameWriter(output: Stream, timeout: TimeSpan, ?validate: byte array -> unit) =
     let semaphore = new SemaphoreSlim(1, 1)
+    let validate = defaultArg validate Protocol.validateOutbound
 
-    member _.WriteAsync(bytes: byte array, cancellation: CancellationToken) =
+    member _.WriteAsync(bytes: byte array, cancellation: CancellationToken, ?prepare: unit -> byte array) =
         task {
-            Protocol.validateOutbound bytes
+            validate bytes
             use deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation)
             deadline.CancelAfter(timeout)
             let mutable entered = false
@@ -78,6 +79,11 @@ type FrameWriter(output: Stream, timeout: TimeSpan) =
                 try
                     do! semaphore.WaitAsync(deadline.Token)
                     entered <- true
+
+                    let bytes =
+                        prepare |> Option.map (fun choose -> choose ()) |> Option.defaultValue bytes
+
+                    validate bytes
                     let framed = Array.append bytes [| 10uy |]
 
                     let writing =
@@ -91,4 +97,18 @@ type FrameWriter(output: Stream, timeout: TimeSpan) =
             finally
                 if entered then
                     semaphore.Release() |> ignore
+        }
+
+    member internal this.WriteFatalAsync(encode: unit -> byte array, ?startDeadline: unit -> CancellationTokenSource) =
+        task {
+            try
+                // Cold serializer initialization must not consume the bounded pipe-write budget.
+                let bytes = encode ()
+
+                use deadline =
+                    (defaultArg startDeadline (fun () -> new CancellationTokenSource(200))) ()
+
+                do! this.WriteAsync(bytes, deadline.Token)
+            with _ ->
+                ()
         }

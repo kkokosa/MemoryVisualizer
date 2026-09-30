@@ -41,6 +41,8 @@ jobs:
       - name: Typecheck workspace and check formatting
         run: npm run typecheck
       - run: npm run format:check
+      - name: Bundle relocation and link-containment regressions
+        run: npm run test:bundle
       - name: Restore pinned F# formatter
         run: dotnet tool restore
       - run: dotnet fantomas --check src tests
@@ -84,3 +86,22 @@ jobs:
         run: npm run test:electron
         env:
           RUNTIME_IDENTIFIER: ${{ matrix.rid }}
+      - name: Generated WithHeap native desktop workflow (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dotnet test tests/MemoryVisualizer.Analysis.Tests -c Release --no-build --no-restore --filter FullyQualifiedName~DesktopIntegrationTests
+        timeout-minutes: 10
+        env:
+          RUNTIME_IDENTIFIER: ${{ matrix.rid }}
+          MEMORYVISUALIZER_DESKTOP_E2E: "1"
+          MEMORYVISUALIZER_FIXTURE_DUMP_TYPE: WithHeap
+      - name: Generated WithHeap native desktop workflow
+        if: runner.os != 'Linux'
+        run: dotnet test tests/MemoryVisualizer.Analysis.Tests -c Release --no-build --no-restore --filter FullyQualifiedName~DesktopIntegrationTests
+        timeout-minutes: 10
+        env:
+          RUNTIME_IDENTIFIER: ${{ matrix.rid }}
+          MEMORYVISUALIZER_DESKTOP_E2E: "1"
+          MEMORYVISUALIZER_FIXTURE_DUMP_TYPE: WithHeap
+      - name: Assemble self-contained host workspace and check SDK-free worker
+        run: npm run build:workspace
+        timeout-minutes: 10

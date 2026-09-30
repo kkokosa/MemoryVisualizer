@@ -6,9 +6,9 @@ It produces rows and address-based drawing **instructions**. The shared
 [scene library](scenes.md) consumes these instructions for positioned geometry and
 standalone SVG; MQL itself does not lay out graphics. The native `query` CLI keeps
 its JSON contract, while `export` uses the same library plus the scene pipeline.
-The v1 worker/Electron fake backend is unchanged;
-real IPC binding belongs to #13. Full #11 is not complete: graph/root-path M2
-and worker/CLI real-protocol equivalence remain deferred.
+The v1 worker fake backend is unchanged; the [native v3 desktop bridge](desktop-workspace.md)
+uses this same preparation/execution API with bounded pages. Full #11 is not
+complete: graph/root-path M2 remains deferred.
 
 ## Grammar and capability matrix
 
@@ -79,6 +79,22 @@ segment address. Generation uses the captured generation interval and parent
 segment identity. Object End is intentionally not a property: Address + Size
 can equal `2^64`. Drawing instructions preserve address plus uint64 size,
 without overflow, clamping or floating-point conversion.
+
+`Segment` retains ClrMD's generic GC-extent terminology for compatibility. On a
+region-based GC it can represent a **region**, not just a traditional large GC
+segment. The extractor uses `ClrHeap.Segments` and records each subheap's
+`HasRegions` flag; regions, legacy segments and large/pinned/frozen extents are
+not renamed or merged by MQL. A BOX covers the reported **object range**, not
+the whole committed or reserved range (those are captured separately).
+
+For `MATCH (seg: Segment) RETURN seg AS BOX`, each returned interval is
+continuous. Compact breaks occur **between** selected intervals, never inside
+one. They are holes in the union of this query's selected ranges, not evidence
+that those addresses are unmapped, free or unused. Filtering objects can leave
+out other live objects; segment object ranges can leave out reservation tails.
+Add generation overlays inside those ranges and their address alignment is
+preserved. Use Linear to retain actual spacing; use `IsFree` to find captured
+free objects rather than interpreting compact breaks as free space.
 
 All ranges are half-open `[start,end)`. Equal endpoints are valid empty ranges;
 inverted ranges are errors. OVERLAPS means a shared byte, including objects
@@ -195,6 +211,11 @@ statuses, and is not the closed worker v1 protocol or a future scene schema.
 CLI extraction has its own existing limits; MQL execution limits begin after
 index creation. The `export` command then applies scene and SVG budgets without
 changing the MQL result or `query` JSON schema.
+Scene layout is a host setting, not a query transformation: `export --layout
+compact` and the desktop's default Compact overview use the same shared mapping
+and explicit gap markers. `--layout linear` (the CLI default) retains true
+address spacing. Box `Width` is vertical thickness; horizontal extent still
+represents occupied bytes, with no per-box minimum or browser-side relayout.
 
 ### Shared API
 

@@ -45,6 +45,7 @@ module Worker =
             let writer = FrameWriter(output, TimeSpan.FromSeconds(2.0))
             let gate = obj ()
             let pending = Dictionary<uint64, Pending>()
+            let tearingDown = Dictionary<uint64, Pending>()
             let mutable snapshot = None
             let mutable nextSnapshot = 0UL
             let mutable lastRequest = 0UL
@@ -82,7 +83,7 @@ module Worker =
                         truncated = truncated
                     |}
 
-            let result request =
+            let result (request: Request) =
                 match request.Operation with
                 | Capabilities ->
                     Protocol.success request None {|
@@ -174,7 +175,15 @@ module Worker =
                                                 Protocol.error work.Request "Cancelled")
                                 }
 
-                            do! writer.WriteAsync(terminal, connection.Token)
+                            // Admission ends before a terminal can become visible; pipe flush may finish later.
+                            do!
+                                writer.WriteAsync(
+                                    terminal,
+                                    connection.Token,
+                                    fun () ->
+                                        lock gate (fun () -> pending.Remove(work.Request.Id) |> ignore)
+                                        terminal
+                                )
                         with
                         | :? OperationCanceledException when connection.IsCancellationRequested -> ()
                         | ProtocolFailure code -> fail code
@@ -183,12 +192,13 @@ module Worker =
                     finally
                         lock gate (fun () ->
                             pending.Remove(work.Request.Id) |> ignore
+                            tearingDown.Remove(work.Request.Id) |> ignore
                             work.Cancellation.Dispose())
 
                         work.Completion.TrySetResult(()) |> ignore
                 }
 
-            let accept request =
+            let accept (request: Request) =
                 task {
                     let action =
                         lock gate (fun () ->
@@ -225,6 +235,7 @@ module Worker =
                                 }
 
                                 pending.Add(request.Id, work)
+                                tearingDown.Add(request.Id, work)
                                 Choice2Of2 work)
 
                     match action with
@@ -237,7 +248,7 @@ module Worker =
                     snapshot <- None
                     cancelWhere (fun _ -> true)
 
-                    pending.Values
+                    tearingDown.Values
                     |> Seq.map (fun work -> work.Completion.Task :> Task)
                     |> Seq.toArray)
                 |> Task.WhenAll
@@ -299,12 +310,7 @@ module Worker =
             if failure.Task.IsCompleted then
                 let code = failure.Task.Result
                 // Best effort is itself bounded; an uncooperative stream cannot keep the process alive.
-                use fatalDeadline = new CancellationTokenSource(200)
-
-                try
-                    do! writer.WriteAsync(Protocol.fatal code, fatalDeadline.Token)
-                with _ ->
-                    ()
+                do! writer.WriteFatalAsync(fun () -> Protocol.fatal code)
                 // Diagnostics are fixed strings, and are not allowed to block cleanup either.
                 try
                     let writing =

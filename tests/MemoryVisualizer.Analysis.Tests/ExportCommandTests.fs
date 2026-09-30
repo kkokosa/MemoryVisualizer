@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Threading
 open MemoryVisualizer.Cli
+open MemoryVisualizer.Scene
 open Xunit
 
 let private invoke arguments =
@@ -65,6 +66,9 @@ let ``Compile and all limit validation precede native import and filesystem crea
             "MATCH(o:Object) RETURN o", [| "--max-elements"; "0" |], "SCN001"
             "MATCH(o:Object) RETURN o", [| "--max-svg-bytes"; "0" |], "MaxBytes"
             "MATCH(o:Object) RETURN o", [| "--view-start"; "0" |], "specified together"
+            "MATCH(o:Object) RETURN o", [| "--layout"; "unknown" |], "--layout must be linear or compact"
+            "MATCH(o:Object) RETURN o", [| "--layout" |], "Missing value for --layout"
+            "MATCH(o:Object) RETURN o", [| "--layout"; "linear"; "--layout"; "compact" |], "Duplicate option: --layout"
         ] do
         let args =
             Array.append [| "missing.dmp"; "--query"; query; "--output"; "unused.svg" |] extra
@@ -73,6 +77,48 @@ let ``Compile and all limit validation precede native import and filesystem crea
         Assert.Equal(2, code)
         Assert.Equal("", output)
         Assert.Contains(expected, error)
+
+[<Fact>]
+let ``Export preserves linear default and passes explicit layout to the shared scene engine`` () =
+    let directory =
+        Path.Combine(Path.GetTempPath(), "MemoryVisualizer-export-layout-" + Guid.NewGuid().ToString("N"))
+
+    Directory.CreateDirectory directory |> ignore
+
+    try
+        for name, extra, expected in
+            [
+                "default", [||], SceneLayout.Linear
+                "linear", [| "--layout"; "linear" |], SceneLayout.Linear
+                "compact", [| "--layout"; "compact" |], SceneLayout.Compact
+            ] do
+            use stdout = new StringWriter()
+            use stderr = new StringWriter()
+            let mutable observed = None
+
+            let exporter _ _ _ _ (options: SceneOptions) _ (stream: Stream) _ =
+                observed <- Some options.Layout
+                stream.Write [| 1uy |]
+                0, ""
+
+            let output = Path.Combine(directory, name + ".svg")
+
+            let arguments =
+                Array.append
+                    [|
+                        "unused.dmp"
+                        "--query"
+                        "MATCH(s:Segment) RETURN s AS BOX"
+                        "--output"
+                        output
+                    |]
+                    extra
+
+            Assert.Equal(0, ExportCommand.runWith exporter arguments stdout stderr CancellationToken.None)
+            Assert.Equal(Some expected, observed)
+            Assert.Equal("", stderr.ToString())
+    finally
+        Directory.Delete(directory, true)
 
 [<Fact>]
 let ``Existing output input collision missing directories and failed import never alter files`` () =

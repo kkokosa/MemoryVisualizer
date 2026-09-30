@@ -179,16 +179,23 @@ test(
       await client.ready;
       const times: number[] = [];
       client.on("progress", () => times.push(performance.now()));
+      const firstProgress = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("First progress deadline elapsed.")), 5000);
+        client.once("progress", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
       const slow = client.request({
         operation: "snapshot.load",
         snapshotId: null,
-        args: { source: "fixture:tiny", delayMs: 1000 },
+        args: { source: "fixture:tiny", delayMs: 5000 },
       });
       const rejected = assert.rejects(slow.result, { code: "Cancelled" });
-      await new Promise((done) => setTimeout(done, 350));
+      await firstProgress;
       for (let i = 0; i < 1000; i++) client.cancel(slow.requestId);
       await rejected;
-      assert.ok(times.length >= 1 && times.length <= 4);
+      assert.ok(times.length >= 1 && times.length <= 3);
       for (let i = 1; i < times.length; i++) assert.ok(times[i]! - times[i - 1]! >= 99);
       const loaded = await client.request({
         operation: "snapshot.load",
@@ -314,7 +321,13 @@ test(
       };
       const pending = Array.from({ length: 8 }, () => client.request(input).result);
       assert.throws(() => client.request(input), { code: "Busy" });
-      await Promise.all(pending);
+      const responses = await Promise.all(pending);
+      assert.equal(
+        responses.length,
+        8,
+        "All first eight requests immediately after load must be admitted.",
+      );
+      assert.ok(responses.every((response) => response.result.tag === "page"));
     } finally {
       await client.close();
     }
