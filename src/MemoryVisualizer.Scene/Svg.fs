@@ -92,6 +92,53 @@ module Svg =
                     attr "width" (number bounds.Width)
                     attr "height" (number bounds.Height)
 
+                let style (value: ResolvedStyle) =
+                    attr "fill" value.Fill
+                    attr "stroke" value.Stroke
+                    attr "stroke-width" (number value.StrokeWidth)
+
+                let line (first: ScenePoint) (last: ScenePoint) =
+                    attr "x1" (number first.X)
+                    attr "y1" (number first.Y)
+                    attr "x2" (number last.X)
+                    attr "y2" (number last.Y)
+
+                let text id (text: SceneText) =
+                    start "defs"
+                    start "clipPath"
+                    attr "id" (id + "-text-clip")
+                    attr "clipPathUnits" "userSpaceOnUse"
+                    start "rect"
+                    rect text.Bounds
+                    finish ()
+                    finish ()
+                    finish ()
+                    start "g"
+                    attr "clip-path" ("url(#" + id + "-text-clip)")
+                    attr "data-text-replacements" (integer text.ReplacedCodeUnits)
+                    attr "data-text-truncated" (boolean text.IsTruncated)
+
+                    for line in text.Lines do
+                        token.ThrowIfCancellationRequested()
+
+                        if line.Text.Length > 0 then
+                            start "text"
+                            attr "x" (number line.X)
+                            attr "y" (number line.Baseline)
+                            attr "font-family" "monospace"
+                            attr "font-size" (number text.FontSize)
+                            attr "font-variant-ligatures" "none"
+                            attr "fill" text.Fill
+                            attr "textLength" (number line.Width)
+                            attr "lengthAdjust" "spacingAndGlyphs"
+
+                            xml.WriteAttributeString("xml", "space", "http://www.w3.org/XML/1998/namespace", "preserve")
+
+                            xml.WriteString line.Text
+                            finish ()
+
+                    finish ()
+
                 let status, reasons =
                     match scene.Completeness.SceneStatus with
                     | SceneStatus.Complete -> "complete", []
@@ -127,10 +174,9 @@ module Svg =
 
                 attr
                     "data-address-layout"
-                    (if scene.Redaction.Addresses then
-                         "schematic"
-                     else
-                         "relative")
+                    (if scene.Redaction.Addresses then "schematic"
+                     elif scene.Layout = SceneLayout.Compact then "compact"
+                     else "relative")
 
                 attr "data-redact-addresses" (boolean scene.Redaction.Addresses)
                 attr "data-redact-strings" (boolean scene.Redaction.Strings)
@@ -140,6 +186,33 @@ module Svg =
                 rect scene.Bounds
                 attr "fill" scene.Theme.Background
                 finish ()
+
+                scene.Gaps
+                |> Option.iter (fun markers ->
+                    for index, offset in markers.Offsets |> List.indexed do
+                        token.ThrowIfCancellationRequested()
+                        start "g"
+                        attr "id" ("address-gap-" + integer index)
+                        attr "data-kind" "address-gap"
+                        attr "transform" ("translate(" + number offset + ",0)")
+                        attr "pointer-events" "none"
+                        start "rect"
+                        rect markers.Band
+                        attr "fill" markers.Style.Fill
+                        attr "stroke" "none"
+                        finish ()
+
+                        for first, last in markers.Lines do
+                            start "line"
+                            line first last
+                            attr "fill" "none"
+                            attr "stroke" markers.Style.Stroke
+                            attr "stroke-width" (number markers.Style.StrokeWidth)
+                            finish ()
+
+                        finish ()
+
+                    text "address-layout-legend" markers.Legend)
 
                 for lane in scene.Lanes do
                     token.ThrowIfCancellationRequested()
@@ -179,57 +252,12 @@ module Svg =
                         rect bounds
                     | SceneGeometry.Line(first, last) ->
                         start "line"
-                        attr "x1" (number first.X)
-                        attr "y1" (number first.Y)
-                        attr "x2" (number last.X)
-                        attr "y2" (number last.Y)
+                        line first last
 
-                    attr "fill" element.Style.Fill
-                    attr "stroke" element.Style.Stroke
-                    attr "stroke-width" (number element.Style.StrokeWidth)
+                    style element.Style
                     finish ()
 
-                    element.Text
-                    |> Option.iter (fun text ->
-                        start "defs"
-                        start "clipPath"
-                        attr "id" (element.Id + "-text-clip")
-                        attr "clipPathUnits" "userSpaceOnUse"
-                        start "rect"
-                        rect text.Bounds
-                        finish ()
-                        finish ()
-                        finish ()
-                        start "g"
-                        attr "clip-path" ("url(#" + element.Id + "-text-clip)")
-                        attr "data-text-replacements" (integer text.ReplacedCodeUnits)
-                        attr "data-text-truncated" (boolean text.IsTruncated)
-
-                        for line in text.Lines do
-                            token.ThrowIfCancellationRequested()
-
-                            if line.Text.Length > 0 then
-                                start "text"
-                                attr "x" (number line.X)
-                                attr "y" (number line.Baseline)
-                                attr "font-family" "monospace"
-                                attr "font-size" (number text.FontSize)
-                                attr "font-variant-ligatures" "none"
-                                attr "fill" text.Fill
-                                attr "textLength" (number line.Width)
-                                attr "lengthAdjust" "spacingAndGlyphs"
-
-                                xml.WriteAttributeString(
-                                    "xml",
-                                    "space",
-                                    "http://www.w3.org/XML/1998/namespace",
-                                    "preserve"
-                                )
-
-                                xml.WriteString line.Text
-                                finish ()
-
-                        finish ())
+                    element.Text |> Option.iter (text element.Id)
 
                     finish ()
 

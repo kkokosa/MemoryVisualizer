@@ -66,12 +66,12 @@ class JsonScanner {
     return invalid();
   }
 
-  private value(depth: number, key?: string): void {
+  private value(depth: number, key?: string, offsetNumber = false): void {
     this.whitespace();
     const character = this.input[this.offset];
     if (character === "{" || character === "[") {
       if (depth >= MAX_DEPTH) invalid();
-      this.container(character, depth + 1);
+      this.container(character, depth + 1, character === "[" && key === "offsets");
       return;
     }
     if (character === '"') {
@@ -79,7 +79,8 @@ class JsonScanner {
       return;
     }
     const remaining = this.input.slice(this.offset);
-    const floating = this.nativeNumbers && key !== undefined && sceneNumbers.has(key);
+    const floating =
+      this.nativeNumbers && (offsetNumber || (key !== undefined && sceneNumbers.has(key)));
     const literal = (
       floating
         ? /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/
@@ -97,7 +98,7 @@ class JsonScanner {
     this.offset += literal[0].length;
   }
 
-  private container(open: "{" | "[", depth: number): void {
+  private container(open: "{" | "[", depth: number, offsets = false): void {
     const close = open === "{" ? "}" : "]";
     const keys = new Set<string>();
     this.offset++;
@@ -116,7 +117,7 @@ class JsonScanner {
         this.whitespace();
         if (this.input[this.offset++] !== ":") invalid();
       }
-      this.value(depth, key);
+      this.value(depth, key, offsets);
       this.whitespace();
       const separator = this.input[this.offset++];
       if (separator === close) return;

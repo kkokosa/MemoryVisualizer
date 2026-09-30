@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
@@ -119,6 +120,20 @@ const editor = async (value) => {
     input.dispatchEvent(new Event("input", {bubbles:true}));
   })()`);
 };
+const layout = async (value) => {
+  await evaluate(`(() => {
+    const input = document.querySelector('[data-testid="setting-layout"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event("change", {bubbles:true}));
+  })()`);
+};
+const runQuery = async () => {
+  const count = queryResults.length;
+  await click("Run query");
+  await wait(() => queryResults.length === count + 1, "MQL did not execute.");
+  return queryResults[count];
+};
 const cancelAfterCommit = async () => {
   await wait(() => commitBarrier.committed, "Native operation did not commit.", 120000);
   await click("Cancel");
@@ -184,16 +199,57 @@ async function run() {
       "Dump did not become usable.",
       120000,
     );
-    const query = "MATCH (s:Segment) RETURN s AS BOX(Label=s.Heap,Background=Blue)";
+    const query =
+      "MATCH (seg: Segment) RETURN seg AS BOX (Background = Blue, Width = 40);\n" +
+      "MATCH (gen: Generation) RETURN gen.Generation AS BOX " +
+      "(Label = gen.Generation, LabelPosition = InnerCenter, Background = Grey, Width = 24);";
     await editor(query);
-    await click("Run query");
-    await wait(() => queryResults.length === 1, "MQL did not execute.");
-    assert.equal(queryResults[0].status, "complete");
-    assert.equal(queryResults[0].sourcePartial, false);
-    assert.ok(queryResults[0].scene.elementCount > 0);
+    const overview = await runQuery();
+    assert.equal(overview.status, "complete");
+    assert.equal(overview.sourcePartial, false);
+    assert.equal(overview.scene.layout, "compact");
+    assert.ok(overview.scene.elementCount > 0);
     await wait(
       () => evaluate(`Boolean(document.querySelector("svg [data-element-id]"))`),
       "Shared SVG was not rendered.",
+    );
+    const visibleColors = await evaluate(`(() => {
+      const boxes = [...document.querySelectorAll("svg .scene-shape")];
+      return ["rgb(0, 0, 255)", "rgb(128, 128, 128)"].map(color =>
+        boxes.some(box => getComputedStyle(box).fill === color && box.getBoundingClientRect().width > 4));
+    })()`);
+    assert.deepEqual(
+      visibleColors,
+      [true, true],
+      "Default overview must show blue and grey fills, not just a lane outline.",
+    );
+    assert.equal(
+      await evaluate(`document.querySelectorAll('svg [data-kind="address-gap"]').length`),
+      overview.scene.gaps?.offsets.length ?? 0,
+    );
+    await layout("linear");
+    await wait(
+      () => evaluate(`document.querySelector('[data-testid="export-svg"]').disabled`),
+      "Layout changes did not invalidate stale export.",
+    );
+    const linear = await runQuery();
+    assert.equal(linear.scene.layout, "linear");
+    assert.equal(linear.scene.gaps, null);
+    await wait(
+      () =>
+        evaluate(
+          `document.querySelector("svg[data-scene-version]")?.getAttribute("data-address-layout") === "relative"`,
+        ),
+      "Linear mode was not rendered.",
+    );
+    await layout("compact");
+    await runQuery();
+    await wait(
+      () =>
+        evaluate(
+          `document.querySelector("svg[data-scene-version]")?.getAttribute("data-address-layout") === "compact"`,
+        ),
+      "Compact mode was not restored.",
     );
     window.focus();
     window.webContents.focus();
@@ -250,6 +306,7 @@ async function run() {
     const svg = await readFile(svgPath, "utf8");
     assert.match(svg, /<svg/);
     assert.doesNotMatch(svg, /<script/);
+    console.log(`Native desktop SVG SHA256: ${createHash("sha256").update(svg).digest("hex")}`);
     savePaths.push(recipePath);
     holdCommittedReply("saveRecipe");
     await click("Save recipe");
@@ -267,15 +324,15 @@ async function run() {
       }
     }, "Recipe not saved.");
     const recipe = JSON.parse(await readFile(recipePath, "utf8"));
-    assert.equal(recipe.schemaVersion, 1);
+    assert.equal(recipe.schemaVersion, 2);
+    assert.equal(recipe.settings.layout, "compact");
     assert.equal(recipe.query, query);
     assert.equal(JSON.stringify(recipe).includes(dac), false);
     assert.equal(JSON.stringify(recipe).includes(dump), false);
     await editor("MATCH (o:Object) RETURN unsupported");
-    await click("Run query");
-    await wait(() => queryResults.length === 2, "Diagnostic query did not finish.");
-    assert.equal(queryResults[1].status, "failed");
-    assert.ok(queryResults[1].diagnostics[0].span.length > 0);
+    const diagnostic = await runQuery();
+    assert.equal(diagnostic.status, "failed");
+    assert.ok(diagnostic.diagnostics[0].span.length > 0);
     await wait(
       () =>
         evaluate(
@@ -284,13 +341,13 @@ async function run() {
       "Diagnostic query did not release the UI.",
     );
     await editor(query);
-    await click("Run query");
-    await wait(() => queryResults.length === 3, "Recovery query did not finish.");
+    await runQuery();
     await wait(
       () => evaluate(`document.querySelectorAll("svg rect").length > 0`),
       "Recovery scene was not rendered.",
     );
     await editor(`${query};`);
+    const beforeCrashQueries = queryResults.length;
     const beforeCrash = await evaluate("document.querySelector('textarea').value");
     await evaluate(`(() => {
     window.__testFailure = null;
@@ -305,7 +362,7 @@ async function run() {
       "Worker failure was not visible.",
     );
     assert.equal(await evaluate("document.querySelector('textarea').value"), beforeCrash);
-    assert.equal(queryResults.length, 3, "Crash silently replayed a query.");
+    assert.equal(queryResults.length, beforeCrashQueries, "Crash silently replayed a query.");
     assert.equal(
       await evaluate(`document.querySelectorAll("svg rect").length`),
       0,

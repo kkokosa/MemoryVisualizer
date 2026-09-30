@@ -6,7 +6,7 @@ It produces rows and address-based drawing **instructions**. The shared
 [scene library](scenes.md) consumes these instructions for positioned geometry and
 standalone SVG; MQL itself does not lay out graphics. The native `query` CLI keeps
 its JSON contract, while `export` uses the same library plus the scene pipeline.
-The v1 worker fake backend is unchanged; the [native v2 desktop bridge](desktop-workspace.md)
+The v1 worker fake backend is unchanged; the [native v3 desktop bridge](desktop-workspace.md)
 uses this same preparation/execution API with bounded pages. Full #11 is not
 complete: graph/root-path M2 remains deferred.
 
@@ -195,6 +195,11 @@ statuses, and is not the closed worker v1 protocol or a future scene schema.
 CLI extraction has its own existing limits; MQL execution limits begin after
 index creation. The `export` command then applies scene and SVG budgets without
 changing the MQL result or `query` JSON schema.
+Scene layout is a host setting, not a query transformation: `export --layout
+compact` and the desktop's default Compact overview use the same shared mapping
+and explicit gap markers. `--layout linear` (the CLI default) retains true
+address spacing. Box `Width` is vertical thickness; horizontal extent still
+represents occupied bytes, with no per-box minimum or browser-side relayout.
 
 ### Shared API
 

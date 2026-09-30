@@ -256,6 +256,15 @@ export function Diagram({
         <span className="muted">{Math.round((initial.width / view.width) * 100)}%</span>
         <span className="hint">Drag to pan · + / − zoom · F fit · [ / ] select</span>
       </div>
+      <p className="diagram-scale" data-testid="address-layout-note">
+        {scene.redaction.addresses
+          ? "Schematic view: address positions and byte sizes are hidden."
+          : scene.layout === "compact"
+            ? scene.gaps
+              ? `Compact overview: ${scene.gaps.offsets.length} empty address gaps compressed. // marks breaks in the address scale.`
+              : "Compact overview: no empty gaps between the selected ranges."
+            : "Linear address scale: empty address gaps keep their full size."}
+      </p>
       <div
         className="diagram-viewport"
         data-testid="memory-diagram"
@@ -346,6 +355,25 @@ export function Settings({
       disabled={disabled}
     >
       <h3 id="settings-title">Scene settings</h3>
+      <label className="field">
+        Address layout
+        <select
+          data-testid="setting-layout"
+          value={draft.layout}
+          aria-describedby="layout-help"
+          onChange={(event) => {
+            const layout = event.target.value;
+            if (layout === "compact" || layout === "linear") onChange({ ...draft, layout });
+          }}
+        >
+          <option value="compact">Compact overview (compress empty gaps)</option>
+          <option value="linear">Linear (true address spacing)</option>
+        </select>
+      </label>
+      <p className="hint" id="layout-help">
+        Compact preserves byte proportions within occupied ranges and marks omitted gaps. Linear
+        preserves address distances. Run again after changing layout.
+      </p>
       {field("plotWidth", "Plot width (scene units)", 64, 4096)}
       <div className="field-pair">
         {field("maxResults", "Max rows", 1, 4096)}

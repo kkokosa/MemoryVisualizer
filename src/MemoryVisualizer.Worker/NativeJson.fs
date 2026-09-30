@@ -86,6 +86,45 @@ module NativeJson =
 
     let private point (value: ScenePoint) = {| x = value.X; y = value.Y |}
 
+    let private style (value: ResolvedStyle) = {|
+        fill = value.Fill
+        stroke = value.Stroke
+        strokeWidth = value.StrokeWidth
+    |}
+
+    let private sceneText (value: SceneText) = {|
+        bounds = bounds value.Bounds
+        lines =
+            value.Lines
+            |> List.map (fun line -> {|
+                text = line.Text
+                x = line.X
+                baseline = line.Baseline
+                width = line.Width
+            |})
+            |> List.toArray
+        cellWidth = value.CellWidth
+        fontSize = value.FontSize
+        lineHeight = value.LineHeight
+        fill = value.Fill
+        replacedCodeUnits = value.ReplacedCodeUnits
+        isTruncated = value.IsTruncated
+    |}
+
+    let private gaps (value: SceneGapMarkers) = {|
+        offsets = List.toArray value.Offsets
+        band = bounds value.Band
+        lines =
+            value.Lines
+            |> List.map (fun (start, finish) -> {|
+                start = point start
+                finish = point finish
+            |})
+            |> List.toArray
+        style = style value.Style
+        legend = sceneText value.Legend
+    |}
+
     let element (item: SceneElement) : obj =
         box {|
             id = item.Id
@@ -105,31 +144,8 @@ module NativeJson =
                         finish = point finish
                     |}
             bounds = bounds item.Bounds
-            style = {|
-                fill = item.Style.Fill
-                stroke = item.Style.Stroke
-                strokeWidth = item.Style.StrokeWidth
-            |}
-            text =
-                item.Text
-                |> nullable (fun value -> {|
-                    bounds = bounds value.Bounds
-                    lines =
-                        value.Lines
-                        |> List.map (fun line -> {|
-                            text = line.Text
-                            x = line.X
-                            baseline = line.Baseline
-                            width = line.Width
-                        |})
-                        |> List.toArray
-                    cellWidth = value.CellWidth
-                    fontSize = value.FontSize
-                    lineHeight = value.LineHeight
-                    fill = value.Fill
-                    replacedCodeUnits = value.ReplacedCodeUnits
-                    isTruncated = value.IsTruncated
-                |})
+            style = style item.Style
+            text = item.Text |> nullable sceneText
             source =
                 item.Source
                 |> nullable (fun value -> {|
@@ -157,6 +173,15 @@ module NativeJson =
 
         box {|
             schemaVersion = scene.SchemaVersion
+            layout =
+                match scene.Layout with
+                | SceneLayout.Linear -> "linear"
+                | SceneLayout.Compact -> "compact"
+            gaps =
+                if scene.Redaction.Addresses || scene.Layout = SceneLayout.Linear then
+                    null
+                else
+                    scene.Gaps |> nullable gaps
             sceneId = Protocol.idValue sceneId
             snapshotId = SnapshotId.format scene.SnapshotId
             bounds = bounds scene.Bounds

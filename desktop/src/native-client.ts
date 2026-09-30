@@ -5,6 +5,7 @@ import { FrameDecoder, encodeFrame } from "./framing.js";
 import { parseNativeInbound, parseNativeOutbound } from "./native-protocol.js";
 import {
   NATIVE_LIMITS,
+  NATIVE_VERSION,
   type NativeCapabilities,
   type NativeInbound,
   type NativeOperation,
@@ -136,7 +137,7 @@ export class NativeClient extends EventEmitter {
         resolve();
       });
     });
-    this.write({ tag: "hello", versions: [2], extensions: [] });
+    this.write({ tag: "hello", versions: [NATIVE_VERSION], extensions: [] });
   }
 
   get activeSnapshot(): string | null {
@@ -164,7 +165,7 @@ export class NativeClient extends EventEmitter {
     // Validate and detach caller-owned objects before changing any state or writing.
     const checked = parseNativeInbound({
       tag: "request",
-      version: 2,
+      version: NATIVE_VERSION,
       requestId,
       operation: input.operation,
       snapshotId: input.snapshotId,
@@ -245,7 +246,7 @@ export class NativeClient extends EventEmitter {
         "Native cancellation did not complete within 2 seconds. The owned worker was terminated because a native call may be blocked; no work was retried.",
       );
     }, CANCEL_MS);
-    this.write({ tag: "cancel", version: 2, requestId });
+    this.write({ tag: "cancel", version: NATIVE_VERSION, requestId });
   }
 
   private stale(pending: Pending): string | null {
@@ -357,7 +358,16 @@ export class NativeClient extends EventEmitter {
         return (
           result.tag === "query" &&
           result.rowCount <= request.args.settings.maxResults &&
-          (result.scene === null || result.scene.elementCount <= request.args.settings.maxElements)
+          (result.scene === null ||
+            (result.scene.elementCount <= request.args.settings.maxElements &&
+              result.scene.layout === request.args.settings.layout &&
+              (
+                Object.keys(
+                  request.args.settings.redaction,
+                ) as (keyof typeof request.args.settings.redaction)[]
+              ).every(
+                (key) => result.scene!.redaction[key] === request.args.settings.redaction[key],
+              )))
         );
       case "query.page":
         return (
@@ -442,7 +452,7 @@ export class NativeClient extends EventEmitter {
         this.fail("Timeout", "Native worker shutdown timed out; its owned process was terminated."),
       SHUTDOWN_MS,
     );
-    this.write({ tag: "shutdown", version: 2 });
+    this.write({ tag: "shutdown", version: NATIVE_VERSION });
     await this.exited;
     clearTimeout(deadline);
   }

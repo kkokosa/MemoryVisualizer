@@ -3,7 +3,7 @@
 The visual-first slice of #12 turns a supported dump plus bounded MQL into
 editable, standalone vector SVG. `MemoryVisualizer.Scene` references Query/Core,
 not ClrMD, a browser, or Electron. The [M1 desktop workspace](desktop-workspace.md)
-consumes these exact positions through native protocol v2 for interactive
+consumes these exact positions through native protocol v3 for interactive
 rendering, selection and shared-engine export. Platform acceptance is verified
 through #13. Worker protocol v1 and its explicit fake backend are unchanged.
 This scene version is not an unversioned addition to that closed IPC protocol.
@@ -29,11 +29,13 @@ before import. `SceneExecutionContext.create token` supplies defaults;
 
 | Property        | Contract                                                                                                                                                               |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SchemaVersion` | `1`; independent of snapshot, query JSON and worker protocol versions                                                                                                  |
+| `SchemaVersion` | `2`; independent of snapshot, query JSON and worker protocol versions                                                                                                  |
 | `SnapshotId`    | In-memory ownership for selection and atomic active-snapshot publication; never serialized in SVG                                                                      |
 | `Bounds`        | Finite scene-unit `X,Y,Width,Height`, including text overflow and stroke margin                                                                                        |
 | `Lanes`         | Ordinal ID, optional runtime/heap, positioned bounds; deterministic numeric runtime/heap order                                                                         |
 | `Elements`      | Stable ordinal ID, lane ID, numeric layer, rectangle or line geometry, geometry bounds, resolved style, optional positioned text and source association, clipping flag |
+| `Layout`        | Requested `SceneLayout.Linear` or `SceneLayout.Compact`; address redaction always uses schematic geometry instead                                                      |
+| `Gaps`          | Optional `SceneGapMarkers`: shared positioned band/lines/style, bounded x translation offsets, and one global positioned legend                                        |
 | `Theme`         | Resolved six-digit lowercase hex colors                                                                                                                                |
 | `Redaction`     | Explicit addresses/strings/paths/labels policy                                                                                                                         |
 | `Completeness`  | Query status/reasons, source available/partial/diagnostic count, scene status/reasons                                                                                  |
@@ -63,6 +65,11 @@ intervals produce no element, while still consuming an inspection. MQL DRAW
 endpoints remain uint64, so only object intervals or the scene viewport can end
 at `2^64`.
 
+`SceneOptions.Layout` defaults to `SceneLayout.Linear` for headless/backward
+compatibility. Desktop overview selects `SceneLayout.Compact`, with an explicit
+linear option for true address-distance inspection. Both are shared-engine
+layouts: neither the browser nor the SVG writer infers positions from addresses.
+
 There is one **global**, not per-lane, origin and scale. Without a viewport,
 origin is the minimum start and end is the maximum end of the admitted visible
 directives. With `Viewport = Some { Start; Size }`, those explicit endpoints
@@ -72,7 +79,7 @@ retains the original interval and `IsClipped` reports the difference. A PIN
 whose interval begins before the viewport is placed on the clipped left edge.
 Viewport clipping is intentional selection, not execution truncation.
 
-For nonempty span `S`, clipped interval `[A,B)` and origin `O`:
+In **linear** mode, for nonempty span `S`, clipped interval `[A,B)` and origin `O`:
 
 ```text
 plotX = 528
@@ -81,7 +88,7 @@ x = 528 + float(A - O) / float(S) * plotWidth
 rectangle width = float(B - A) / float(S) * plotWidth
 ```
 
-Gaps are not compacted; intervals never wrap. Equal addresses in different
+Linear gaps are not compacted; intervals never wrap. Equal addresses in different
 statements/runtimes/heaps have equal x coordinates, but runtime and heap lanes
 remain distinct. Layout does not infer cross-heap membership. A very large span
 can make a small object subpixel and nearby starts indistinguishable after the
@@ -90,10 +97,71 @@ pixel-resolution uint64 addresses**: use the explicit viewport to zoom. PIN is
 an editable vertical marker at x, with zero-width geometry bounds; its original
 object size remains in the source association.
 
+### Compact overview and explicit address breaks
+
+Compact mode first clips, bounds and admits directives using the same budgets
+as linear mode, then unions **all admitted visible intervals across all runtime
+and heap lanes**. Overlapping, duplicate and touching intervals merge using
+`bigint` endpoints. No heap kind, including frozen segments, is excluded.
+Unselected heap ranges are not scanned. Only empty gaps in that global union
+are compressed; occupied ranges retain one globally consistent byte scale.
+Consequently overlapping addresses align across lanes and relative occupied
+byte lengths remain proportional. A directive itself cannot span a compressed
+gap, because its entire clipped interval contributes to the occupied union.
+
+With `G` nonempty gaps and occupied union size `B` bytes:
+
+```text
+gapWidth = min(12, plotWidth * 0.2 / G)
+dataWidth = plotWidth - G * gapWidth
+x = 528 + float(exact occupied bytes before A) / float(B) * dataWidth
+        + gaps before A * gapWidth
+rectangle width = float(clipped interval byte size) / float(B) * dataWidth
+```
+
+At least 80% of the plot is reserved for data. The exact occupied-byte prefix
+and interval size are computed before float conversion; widths are never
+obtained by subtracting rounded coordinates. Starts use a bounded binary search
+over merged intervals. There is still no artificial minimum byte width.
+Explicit viewport gaps before the first and after the last admitted interval
+are included. Gaps number at most `admitted.Count + 1`; without an explicit
+viewport only internal gaps can exist. Empty scenes and zero-sized viewports
+have no markers. Compact scenes with no gaps retain linear geometry exactly.
+
+For compact scenes with gaps only, the first lane starts at y=48, reserving
+headroom for two diagonal axis strokes per gap and one plain ASCII legend:
+`Compressed address gaps; not linear distance.` A pale amber band spans all
+lanes at each break. All glyph coordinates, colors, stroke widths, font sizes
+and text metrics come from the scene engine and are included in scene bounds.
+
+`SceneGapMarkers` is a packed repeated-glyph DTO:
+
+```text
+Offsets : float list
+Band    : SceneBounds                   // X=0, global Y
+Lines   : (ScenePoint * ScenePoint) list // local X, global Y
+Style   : ResolvedStyle
+Legend  : SceneText                     // global, never translated or repeated
+```
+
+There are no addresses, gap byte counts or source associations in this geometry
+DTO. Consumers instantiate Band/Lines with `translate(offset,0)` for each
+offset, and render Legend once with its own positioning. Keeping one glyph,
+rather than a per-lane/per-gap geometry expansion, bounds transport metadata.
+SVG and desktop render noninteractive, non-source groups `address-gap-N` with
+`data-kind=address-gap`, using those same primitives and translations after the
+canvas background and before lane outlines/elements. Bands use `Style.Fill`
+with no stroke; lines use no fill and `Style.Stroke`/`Style.StrokeWidth`.
+The global legend uses the shared safe text/clipping helper with ID prefix
+`address-layout-legend` (clip ID `address-layout-legend-text-clip`).
+`data-address-layout` is `compact`, `relative` for linear mode,
+or `schematic` for address-redacted scenes.
+
 Within each lane, the maximum of `max(16, directive.Width)` determines content
 height `H`. Width is the cross-axis thickness hint, in scene units, with a
 16-unit visibility floor and a 4096-unit ceiling. It never changes byte scale.
-The first lane starts at y=16; lane height is `H+80`, followed by a 16-unit gap.
+The first lane starts at y=16 (y=48 only for compact-with-gaps); lane height is
+`H+80`, followed by a 16-unit gap.
 An element of height `h` starts at `lane.Y+40+(H-h)/2`. This aligns intervals
 across generation/segment/object layers in the same lane.
 
@@ -174,6 +242,8 @@ within each lane, with fixed 16-unit content height. It removes byte widths,
 absolute/relative address gaps, declared thickness, original clipping flags and
 numeric labels rather than leaking them through geometry or label length.
 Lanes expand horizontally as necessary; no address-derived wrap/scale is used.
+Compaction is bypassed entirely and `Gaps=None` regardless of requested layout;
+neither marker count, legend nor compact headroom leaks the original gaps.
 PIN remains a zero-width, 16-unit marker. Original runtime/heap values are
 replaced by anonymous ordinal lanes. IDs remain ordinal, not hashes of removed
 data. SnapshotId remains in memory for host safety, but **never in SVG**.
@@ -205,6 +275,8 @@ The builder does not call `List.length`, sort, copy labels or walk the entire
 input before admission. Even a manually constructed huge QueryResult has only
 bounded directives examined; query rows and diagnostic text are never enumerated.
 Bounds discovery/sorting operate on at most MaxElements already-admitted items.
+Compact union construction and exact prefix calculations are similarly bounded;
+guards run before/after sorting and throughout merging and positioning.
 Each element contains one rectangle/line plus at most one two-line label; SVG
 adds fixed-size groups/clips and at most MaxLanes outlines. This also bounds
 primitive/DOM overhead and text work, not just final array length. The writer
@@ -251,11 +323,17 @@ or platform newline dependency. Equal dump/query/settings yield identical bytes
 even after a new import generates another SnapshotId, provided execution
 completes under the budgets. No pixel-identical browser screenshot is implied.
 
-The checked-in `tests/MemoryVisualizer.Core.Tests/fixtures/scene-v1.json` is a
-readable positioned-scene golden projection, not an IPC schema. `scene-v1.svg`
-is its exact writer output. Tests also cover large addresses, gaps, overlaps,
+The checked-in `tests/MemoryVisualizer.Core.Tests/fixtures/scene-v2.json` is a
+readable positioned-scene golden projection, not an IPC schema. `scene-v2.svg`
+is its exact writer output. The fixtures are named for scene schema 2; linear
+baseline geometry/SVG bytes are unchanged from schema 1 apart from the embedded
+version. Tests also cover large addresses, gaps, overlaps,
 same addresses across runtimes/heaps, zero-size ranges, clipping, all caps,
-redaction, cancellation/staleness, unsafe text and culture changes. Native tests
+redaction, cancellation/staleness, unsafe text and culture changes. Compact
+unit cases additionally cover massive gaps with wide Blue segments
+and Grey generations, cross-lane unions and byte ratios, touching/duplicate
+ranges, viewport boundary gaps, `2^64` ends, bounded marker counts and shared
+SVG glyph positioning. Native tests
 generate their own WithHeap dump, use its exact offline trusted DAC, compose
 segments/generations/selected objects, and compare SVG across fresh imports.
 

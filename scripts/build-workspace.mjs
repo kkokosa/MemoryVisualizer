@@ -4,6 +4,7 @@ import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promis
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { parseArgs } from "node:util";
 import { assertContainedSymlinks } from "./bundle-links.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,10 +18,13 @@ const hosts = {
 const rid = hosts[`${process.platform}-${process.arch}`];
 if (!rid)
   throw new Error("Unsupported workspace host. Build on Windows/Linux x64 or macOS x64/arm64.");
-const destination = resolve(root, "artifacts", `workspace-${rid}`);
+const { values } = parseArgs({ options: { output: { type: "string" } }, allowPositionals: false });
+if (values.output !== undefined && values.output.trim() === "")
+  throw new Error("Output path must not be empty.");
+const destination = resolve(root, values.output ?? join("artifacts", `workspace-${rid}`));
 try {
   await stat(destination);
-  throw new Error(`Output already exists: ${destination}. Move it aside before rebuilding.`);
+  throw new Error(`Output already exists: ${destination}. Choose a new --output folder.`);
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
 }

@@ -29,14 +29,14 @@ module CommandLine =
             else
                 "Dump analysis, real queries, and rendering are not implemented in this host."
             if worker then
-                "Protocol v1 uses explicit synthetic fixtures; v2 uses the native shared engine."
+                "Protocol v1 uses explicit synthetic fixtures; v3 uses the native shared engine."
             ""
             "  --help, -h, help       Show this help."
             "  --version, version    Show the application version."
             if worker then
                 "  --protocol --backend=fake    Run the synthetic v1 stdio worker."
             if worker then
-                "  --protocol --backend=native  Run the native v2 stdio worker."
+                "  --protocol --backend=native  Run the native v3 stdio worker."
         ]
 
     let run executable (arguments: string array) (stdout: TextWriter) (stderr: TextWriter) =

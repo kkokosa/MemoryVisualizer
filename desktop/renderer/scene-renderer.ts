@@ -1,4 +1,10 @@
-import type { Bounds, SceneElement, SceneInfo } from "../src/native-types.js";
+import {
+  NATIVE_LIMITS,
+  type Bounds,
+  type SceneElement,
+  type SceneInfo,
+  type SceneText,
+} from "../src/native-types.js";
 
 export const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
@@ -39,6 +45,36 @@ export function createSceneSvg(
     width: number(bounds.width),
     height: number(bounds.height),
   });
+  const appendText = (parent: SVGElement, text: SceneText, id: string) => {
+    const clipId = `${id}-text-clip`;
+    const defs = create("defs");
+    const clip = create("clipPath", { id: clipId, clipPathUnits: "userSpaceOnUse" });
+    clip.appendChild(create("rect", boundsAttributes(text.bounds)));
+    defs.appendChild(clip);
+    parent.appendChild(defs);
+    const textGroup = create("g", {
+      "clip-path": `url(#${clipId})`,
+      "data-text-replacements": String(text.replacedCodeUnits),
+      "data-text-truncated": String(text.isTruncated),
+    });
+    for (const line of text.lines) {
+      if (line.text.length === 0) continue;
+      const textElement = create("text", {
+        x: number(line.x),
+        y: number(line.baseline),
+        "font-family": "monospace",
+        "font-size": number(text.fontSize),
+        "font-variant-ligatures": "none",
+        fill: color(text.fill),
+        textLength: number(line.width),
+        lengthAdjust: "spacingAndGlyphs",
+      });
+      textElement.setAttributeNS(XML_NAMESPACE, "xml:space", "preserve");
+      textElement.textContent = line.text;
+      textGroup.appendChild(textElement);
+    }
+    parent.appendChild(textGroup);
+  };
   const svg = create("svg", {
     version: "1.1",
     width: number(scene.bounds.width),
@@ -51,7 +87,11 @@ export function createSceneSvg(
     "data-scene-version": String(scene.schemaVersion),
     "data-scene-status": scene.status,
     "data-scene-truncation": scene.truncationReasons.join(","),
-    "data-address-layout": scene.redaction.addresses ? "schematic" : "relative",
+    "data-address-layout": scene.redaction.addresses
+      ? "schematic"
+      : scene.layout === "compact"
+        ? "compact"
+        : "relative",
     "data-redact-addresses": String(scene.redaction.addresses),
     "data-redact-strings": String(scene.redaction.strings),
     "data-redact-paths": String(scene.redaction.paths),
@@ -60,6 +100,39 @@ export function createSceneSvg(
   svg.appendChild(
     create("rect", { ...boundsAttributes(scene.bounds), fill: color(scene.theme.background) }),
   );
+  if (scene.layout === "compact" && !scene.redaction.addresses && scene.gaps) {
+    const gaps = scene.gaps;
+    for (const [index, offset] of gaps.offsets
+      .slice(0, NATIVE_LIMITS.maxSceneItems + 1)
+      .entries()) {
+      const group = create("g", {
+        id: `address-gap-${index}`,
+        "data-kind": "address-gap",
+        transform: `translate(${number(offset)},0)`,
+        "pointer-events": "none",
+        role: "img",
+        "aria-label": "Compressed address gap",
+      });
+      group.appendChild(
+        create("rect", { ...boundsAttributes(gaps.band), fill: color(gaps.style.fill) }),
+      );
+      for (const line of gaps.lines.slice(0, 2)) {
+        group.appendChild(
+          create("line", {
+            x1: number(line.start.x),
+            y1: number(line.start.y),
+            x2: number(line.finish.x),
+            y2: number(line.finish.y),
+            fill: "none",
+            stroke: color(gaps.style.stroke),
+            "stroke-width": number(gaps.style.strokeWidth),
+          }),
+        );
+      }
+      svg.appendChild(group);
+    }
+    appendText(svg, gaps.legend, "address-layout-legend");
+  }
   for (const [index, lane] of scene.lanes.entries()) {
     const rect = create("rect", {
       id: /^lane-\d+$/.test(lane.id) ? lane.id : `lane-${index}`,
@@ -120,37 +193,7 @@ export function createSceneSvg(
     shape.setAttribute("stroke", color(element.style.stroke));
     shape.setAttribute("stroke-width", number(element.style.strokeWidth));
     group.appendChild(shape);
-    if (element.text) {
-      const text = element.text;
-      const clipId = `${id}-text-clip`;
-      const defs = create("defs");
-      const clip = create("clipPath", { id: clipId, clipPathUnits: "userSpaceOnUse" });
-      clip.appendChild(create("rect", boundsAttributes(text.bounds)));
-      defs.appendChild(clip);
-      group.appendChild(defs);
-      const textGroup = create("g", {
-        "clip-path": `url(#${clipId})`,
-        "data-text-replacements": String(text.replacedCodeUnits),
-        "data-text-truncated": String(text.isTruncated),
-      });
-      for (const line of text.lines) {
-        if (line.text.length === 0) continue;
-        const textElement = create("text", {
-          x: number(line.x),
-          y: number(line.baseline),
-          "font-family": "monospace",
-          "font-size": number(text.fontSize),
-          "font-variant-ligatures": "none",
-          fill: color(text.fill),
-          textLength: number(line.width),
-          lengthAdjust: "spacingAndGlyphs",
-        });
-        textElement.setAttributeNS(XML_NAMESPACE, "xml:space", "preserve");
-        textElement.textContent = line.text;
-        textGroup.appendChild(textElement);
-      }
-      group.appendChild(textGroup);
-    }
+    if (element.text) appendText(group, element.text, id);
     group.addEventListener("click", () => options.onSelect?.(element.id));
     group.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {

@@ -1,4 +1,5 @@
-// Protocol v2 is deliberately separate from the closed synthetic v1 protocol.
+// Native v3 adds explicit layout settings and scene schema 2; synthetic v1 stays closed.
+export const NATIVE_VERSION = 3;
 export const NATIVE_LIMITS = {
   maxFrameBytes: 65536,
   maxOutstanding: 8,
@@ -10,7 +11,9 @@ export const NATIVE_LIMITS = {
 } as const;
 
 export type Redaction = { addresses: boolean; strings: boolean; paths: boolean; labels: boolean };
+export type SceneLayout = "linear" | "compact";
 export type SceneSettings = {
+  layout: SceneLayout;
   plotWidth: number;
   viewport: { start: string; size: string } | null;
   redaction: Redaction;
@@ -18,6 +21,7 @@ export type SceneSettings = {
   maxElements: number;
 };
 export const DEFAULT_SETTINGS: SceneSettings = {
+  layout: "compact",
   plotWidth: 1024,
   viewport: null,
   redaction: { addresses: false, strings: false, paths: false, labels: false },
@@ -35,25 +39,33 @@ export type Source = {
   segmentAddress: string | null;
   methodTable: string | null;
 };
+export type SceneText = {
+  bounds: Bounds;
+  lines: { text: string; x: number; baseline: number; width: number }[];
+  cellWidth: number;
+  fontSize: number;
+  lineHeight: number;
+  fill: string;
+  replacedCodeUnits: number;
+  isTruncated: boolean;
+};
+export type SceneLine = { start: { x: number; y: number }; finish: { x: number; y: number } };
+export type SceneStyle = { fill: string; stroke: string; strokeWidth: number };
+export type SceneGapMarkers = {
+  offsets: number[];
+  band: Bounds;
+  lines: SceneLine[];
+  style: SceneStyle;
+  legend: SceneText;
+};
 export type SceneElement = {
   id: string;
   laneId: string;
   layer: number;
-  geometry:
-    | { kind: "rectangle"; bounds: Bounds }
-    | { kind: "line"; start: { x: number; y: number }; finish: { x: number; y: number } };
+  geometry: { kind: "rectangle"; bounds: Bounds } | ({ kind: "line" } & SceneLine);
   bounds: Bounds;
-  style: { fill: string; stroke: string; strokeWidth: number };
-  text: {
-    bounds: Bounds;
-    lines: { text: string; x: number; baseline: number; width: number }[];
-    cellWidth: number;
-    fontSize: number;
-    lineHeight: number;
-    fill: string;
-    replacedCodeUnits: number;
-    isTruncated: boolean;
-  } | null;
+  style: SceneStyle;
+  text: SceneText | null;
   source: Source | null;
   isClipped: boolean;
 };
@@ -88,7 +100,9 @@ export type Row = {
   values: { name: string; value: QueryValue }[];
 };
 export type SceneInfo = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  layout: SceneLayout;
+  gaps: SceneGapMarkers | null;
   sceneId: string;
   snapshotId: string;
   bounds: Bounds;
@@ -148,10 +162,10 @@ export type NativeOperation =
       args: { runtime: number; address: string; cursor: string | null; pageSize: number };
     }
   | { operation: "export"; snapshotId: string; args: { sceneId: string; path: string } };
-export type NativeRequest = NativeOperation & { tag: "request"; version: 2; requestId: string };
+export type NativeRequest = NativeOperation & { tag: "request"; version: 3; requestId: string };
 export type NativeProgress = {
   tag: "progress";
-  version: 2;
+  version: 3;
   requestId: string;
   snapshotId: string | null;
   phase: string;
@@ -159,7 +173,7 @@ export type NativeProgress = {
 };
 export type NativeSuccess = {
   tag: "success";
-  version: 2;
+  version: 3;
   requestId: string;
   snapshotId: string | null;
   result: NativeResult;
@@ -176,24 +190,26 @@ export const NATIVE_OPERATIONS = [
 ] as const;
 export type NativeCapabilities = {
   backend: "native";
+  sceneSchemaVersion: 2;
+  layouts: readonly ["linear", "compact"];
   operations: typeof NATIVE_OPERATIONS;
   limits: typeof NATIVE_LIMITS;
 };
 export type NativeInbound =
-  | { tag: "hello"; versions: [2]; extensions: [] }
+  | { tag: "hello"; versions: [3]; extensions: [] }
   | NativeRequest
-  | { tag: "cancel"; version: 2; requestId: string }
-  | { tag: "shutdown"; version: 2 };
+  | { tag: "cancel"; version: 3; requestId: string }
+  | { tag: "shutdown"; version: 3 };
 export type NativeOutbound =
-  | { tag: "ready"; version: 2; capabilities: NativeCapabilities }
+  | { tag: "ready"; version: 3; capabilities: NativeCapabilities }
   | NativeSuccess
   | NativeProgress
-  | { tag: "error"; version: 2; requestId: string; snapshotId: string | null; error: NativeError }
+  | { tag: "error"; version: 3; requestId: string; snapshotId: string | null; error: NativeError }
   | { tag: "fatal"; code: string; message: string }
-  | { tag: "bye"; version: 2 };
+  | { tag: "bye"; version: 3 };
 
 export type Recipe = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   query: string;
   settings: SceneSettings;
   annotations: { elementId: string; text: string }[];

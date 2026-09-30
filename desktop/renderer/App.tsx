@@ -1273,7 +1273,7 @@ export function App() {
             : notice}
         </div>
         <span className="status-meta">
-          {dirty ? "Unsaved changes" : "Saved / unchanged"} · native protocol v2
+          {dirty ? "Unsaved changes" : "Saved / unchanged"} · native protocol v3
         </span>
       </footer>
       {error && (

@@ -4,7 +4,7 @@ The desktop uses Electron, React and Vite for local controls and the native F#
 worker for import, indexed selection, MQL, positioning and SVG export. The old
 synthetic v1 shell remains available only through explicit `--fixture` or the
 v1 integration-test launcher. Ordinary desktop startup uses **native protocol
-v2**, never a fake fallback.
+v3**, never a fake fallback.
 
 ## Build and launch
 
@@ -20,7 +20,9 @@ runtime and publishes the worker self-contained for the current supported host:
 Windows x64, Linux glibc x64, macOS x64 or macOS arm64. It uses a locked NuGet
 restore and the exact `global.json` SDK. Output is
 `artifacts/workspace-<RID>`; an existing output folder is never overwritten.
-Move an earlier build aside before rebuilding.
+To keep an earlier or running build intact, choose a new destination, for example
+`npm run build:workspace -- --output artifacts/workspace-win-x64-compact`.
+The optional output folder must not already exist; publication never replaces it.
 Runtime symlinks are preserved verbatim and checked to be relative, resolvable
 and contained within the assembled application, including macOS frameworks.
 
@@ -66,6 +68,17 @@ bundled worker.
    shared engine. Existing files are never overwritten, even if the native save
    dialog offers an overwrite prompt. Choose a different filename.
 
+New workspaces default to **Compact overview** in **Address layout**. The shared
+engine fits occupied memory to the address axis while replacing empty gaps with
+marked breaks. Blue segments and grey generations therefore remain visible when
+a distant frozen segment would otherwise consume most of the linear address
+span. Overlapping ranges stay aligned and occupied byte-length proportions are
+preserved; distances across a break are **not** linear address distances.
+Choose **Linear (true address spacing)** and Run to inspect the original address
+scale. Fit adjusts the camera; it does not change either mapping. Very small
+objects may still need a focused viewport. MQL `Width` controls a box's vertical
+thickness, not its address extent.
+
 The panes have keyboard-adjustable splitters. Native menus expose Open Dump
 (`Ctrl/Cmd+O`), Open Recipe (`Ctrl/Cmd+Shift+O`), Save Recipe
 (`Ctrl/Cmd+S`), Run (`Ctrl/Cmd+Enter`), Cancel (`Escape`) and Export
@@ -90,10 +103,12 @@ Changing query or scene settings requires another Run before export. Changing
 redaction also clears the old scene so it cannot be mistaken for redacted output.
 Scene export refuses partial/truncated/cancelled/failed output, matching the CLI.
 
-## Native protocol v2
+## Native protocol v3
 
 The normative typed wire shapes are in `desktop/src/native-types.ts`, with
 independent strict validators in `native-protocol.ts` and the F# worker.
+Version 3 explicitly supersedes the unreleased native v2 contract; peers
+advertising only v2 are rejected rather than given altered geometry silently.
 This is a deliberate new version, not extra fields in the closed
 [synthetic v1 contract](worker-protocol.md).
 
@@ -107,10 +122,10 @@ canonical decimal strings; addresses use `0x` plus sixteen lowercase hex digits.
 No stdout text other than frames is permitted.
 
 ```json
-{"tag":"hello","versions":[2],"extensions":[]}
-{"tag":"request","version":2,"requestId":"1","snapshotId":null,"operation":"snapshot.load","args":{"path":"MAIN_SELECTED_ABSOLUTE_PATH","dacPath":"MAIN_TRUSTED_DAC","cachePath":null,"allowNetwork":false}}
-{"tag":"cancel","version":2,"requestId":"1"}
-{"tag":"shutdown","version":2}
+{"tag":"hello","versions":[3],"extensions":[]}
+{"tag":"request","version":3,"requestId":"1","snapshotId":null,"operation":"snapshot.load","args":{"path":"MAIN_SELECTED_ABSOLUTE_PATH","dacPath":"MAIN_TRUSTED_DAC","cachePath":null,"allowNetwork":false}}
+{"tag":"cancel","version":3,"requestId":"1"}
+{"tag":"shutdown","version":3}
 ```
 
 Handshake capabilities identify `backend:"native"` and the ordered operations
@@ -118,6 +133,12 @@ Handshake capabilities identify `backend:"native"` and the ordered operations
 `details`, `export`. Limits are `maxFrameBytes:65536`, `maxOutstanding:8`,
 `maxPageSize:32`, `maxSceneItems:1024`, `maxResults:4096`,
 `maxQueryLength:16384`, `progressIntervalMs:100`.
+Capabilities also declare `sceneSchemaVersion:2` and
+`layouts:["linear","compact"]`. Scene headers carry the selected layout and
+nullable packed, positioned gap markers. There are at most 1,025 gap offsets,
+one reusable two-line glyph and one shared text legend; all remain subject to
+the same 65,536-byte frame budget. Decorations have no source associations or
+selection targets. Linear and address-redacted scenes contain no gap markers.
 
 | Operation          | Input                                                | Bounded result                                                                     |
 | ------------------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -130,13 +151,15 @@ Handshake capabilities identify `backend:"native"` and the ordered operations
 | `export`           | Active snapshot/scene ID and main-chosen destination | Atomic shared-engine file publication and byte length, never SVG bytes in IPC      |
 
 `query.run` uses the same `Mql.prepare`, `Mql.bind`, `Mql.execute` and
-`Scene.build` APIs as the CLI. Settings include plot width (64..4096), nullable
+`Scene.build` APIs as the CLI. Settings require `layout:"linear"|"compact"`,
+plot width (64..4096), nullable
 uint64 start/size viewport (empty viewports are valid), redaction flags, result
 limit (1..4096) and scene-element limit (1..1024). Query source is limited to
 **16,384 UTF-16 code units**, matching MQL spans, not Unicode scalar count.
 Other shared parser, execution, extraction and scene limits remain in force.
 The desktop's explicit settings must be supplied to CLI comparison commands
-(for example `--max-elements 1024`).
+(for example `--layout compact --max-elements 1024`). CLI exports retain their
+linear default for compatibility; only new desktop workspaces default to compact.
 
 Only **one retained query and scene** belong to the active snapshot. A new
 query invalidates their previous IDs. Successful snapshot replacement or
@@ -180,9 +203,10 @@ A recipe is bounded UTF-8 JSON (256 KiB, depth 16) with exactly these fields:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "query": "MATCH (s:Segment) RETURN s AS BOX",
   "settings": {
+    "layout": "compact",
     "plotWidth": 1024,
     "viewport": null,
     "redaction": { "addresses": false, "strings": false, "paths": false, "labels": false },
@@ -198,6 +222,14 @@ A recipe is bounded UTF-8 JSON (256 KiB, depth 16) with exactly these fields:
   }
 }
 ```
+
+Version 1 recipes are accepted only with their exact original schema (no layout
+field), then migrated in memory to **linear**. Their query, settings, notes and
+dependency locator are preserved. Opening does not modify the original file;
+Save writes version 2 to a new filename. Version 2 requires an explicit layout;
+unknown versions, fields and layout values are rejected. Changing layout
+invalidates export and detaches old scene-bound notes until a deliberate rerun
+and, for notes, explicit reapplication.
 
 `snapshot` may be null. There are at most 128 distinct element notes, each with
 canonical `elementId` (`element-0` through `element-1023`) and at most 512 UTF-16

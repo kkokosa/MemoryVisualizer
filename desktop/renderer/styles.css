@@ -16,6 +16,7 @@ body {
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -56,6 +57,7 @@ button.text-button {
   outline-offset: 3px;
 }
 input,
+select,
 textarea {
   border: 1px solid #53617a;
   background: #131c29;
@@ -72,6 +74,7 @@ input[type="checkbox"] {
   flex-shrink: 0;
 }
 input:disabled,
+select:disabled,
 fieldset:disabled {
   opacity: 0.55;
 }
@@ -552,6 +555,13 @@ code {
   font-size: 9px;
   text-align: right;
 }
+.diagram-scale {
+  margin: 0;
+  padding: 7px 11px;
+  background: #eff2f5;
+  color: #28374a;
+  font-size: 11px;
+}
 .diagram-viewport {
   position: relative;
   flex: 1;
@@ -788,6 +798,7 @@ tr:nth-child(even) {
   margin-bottom: 12px;
 }
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   font-size: 12px;

@@ -382,8 +382,10 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
 
         Assert.Equal(130, exit)
 
-    [<Fact>]
-    member _.``Real WithHeap offline DAC MQL positioned scene SVG is stable across fresh imports``() =
+    [<Theory>]
+    [<InlineData(false)>]
+    [<InlineData(true)>]
+    member _.``Real WithHeap offline DAC MQL positioned scene SVG is stable across fresh imports``(compact: bool) =
         let options = {
             fixture.Options with
                 IncludeReferences = false
@@ -394,6 +396,11 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
             "MATCH(s:Segment) RETURN s AS BOX(Background=Grey,Width=32);"
             + "MATCH(g:Generation) RETURN g AS BOX(Background=Blue,Width=24,Label=g.Generation);"
             + "MATCH(o:Object) WHERE o.Type=\"MemoryVisualizer.DumpFixture.DuplicatePayload\" RETURN o AS PIN(Background=Red,Label=o.Type,LabelPosition=OuterLeft)"
+
+        let sceneOptions = {
+            SceneOptions.defaults with
+                Layout = if compact then SceneLayout.Compact else SceneLayout.Linear
+        }
 
         let render () =
             let value =
@@ -415,7 +422,7 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
             Assert.False result.SourcePartial
 
             let built =
-                Scene.build SceneOptions.defaults result (SceneExecutionContext.create CancellationToken.None)
+                Scene.build sceneOptions result (SceneExecutionContext.create CancellationToken.None)
 
             Assert.Equal(SceneStatus.Complete, built.Status)
             let scene = built.Scene.Value
@@ -435,6 +442,33 @@ type SnapshotIntegrationTests(fixture: GeneratedDump) =
         let secondId, second = render ()
         Assert.NotEqual(firstId, secondId)
         Assert.Equal<byte array>(first, second)
+        let output = Path.Combine(fixture.Directory, $"scene-equivalence-{compact}.svg")
+        use stdout = new StringWriter()
+        use stderr = new StringWriter()
+
+        try
+            let code =
+                ExportCommand.run
+                    [|
+                        fixture.Path
+                        "--dac"
+                        fixture.Options.Dac.TrustedPaths[0]
+                        "--query"
+                        source
+                        "--layout"
+                        if compact then "compact" else "linear"
+                        "--output"
+                        output
+                    |]
+                    stdout
+                    stderr
+                    CancellationToken.None
+
+            Assert.True((code = 0), stderr.ToString())
+            Assert.Equal<byte array>(first, File.ReadAllBytes output)
+        finally
+            File.Delete output
+
         let xml = System.Xml.Linq.XDocument.Parse(Text.Encoding.UTF8.GetString first)
         Assert.Equal("svg", xml.Root.Name.LocalName)
 

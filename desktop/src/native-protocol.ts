@@ -2,6 +2,7 @@ import { isValidUnicode, ProtocolError } from "./protocol.js";
 import {
   NATIVE_LIMITS,
   NATIVE_OPERATIONS,
+  NATIVE_VERSION,
   type NativeInbound,
   type NativeOutbound,
   type SceneSettings,
@@ -140,7 +141,15 @@ function redaction(value: unknown): void {
 }
 
 export function validateSettings(value: unknown): SceneSettings {
-  const record = fields(value, ["plotWidth", "viewport", "redaction", "maxResults", "maxElements"]);
+  const record = fields(value, [
+    "layout",
+    "plotWidth",
+    "viewport",
+    "redaction",
+    "maxResults",
+    "maxElements",
+  ]);
+  member(record.layout, ["linear", "compact"]);
   integer(record.plotWidth, 64, 4096);
   if (record.viewport !== null) {
     const viewport = fields(record.viewport, ["start", "size"]);
@@ -183,8 +192,19 @@ export function validateWorkspaceDocument(value: unknown): WorkspaceDocument {
 }
 
 function capabilities(value: unknown): void {
-  const record = fields(value, ["backend", "operations", "limits"]);
+  const record = fields(value, [
+    "backend",
+    "sceneSchemaVersion",
+    "layouts",
+    "operations",
+    "limits",
+  ]);
   equal(record.backend, "native");
+  equal(record.sceneSchemaVersion, 2);
+  const layouts = array(record.layouts, 2);
+  equal(layouts.length, 2);
+  equal(layouts[0], "linear");
+  equal(layouts[1], "compact");
   const operations = array(record.operations, NATIVE_OPERATIONS.length);
   equal(operations.length, NATIVE_OPERATIONS.length);
   NATIVE_OPERATIONS.forEach((operation, index) => equal(operations[index], operation));
@@ -199,7 +219,7 @@ function path(value: unknown): void {
 
 function request(record: RecordValue): void {
   fields(record, ["tag", "version", "requestId", "snapshotId", "operation", "args"]);
-  equal(record.version, 2);
+  equal(record.version, NATIVE_VERSION);
   uint64(record.requestId, true);
   if (record.operation === "snapshot.load") {
     equal(record.snapshotId, null);
@@ -256,7 +276,7 @@ export function parseNativeInbound(value: unknown): NativeInbound {
       fields(record, ["tag", "versions", "extensions"]);
       const versions = array(record.versions, 1);
       equal(versions.length, 1);
-      equal(versions[0], 2);
+      equal(versions[0], NATIVE_VERSION);
       equal(array(record.extensions, 0).length, 0);
       break;
     }
@@ -265,12 +285,12 @@ export function parseNativeInbound(value: unknown): NativeInbound {
       break;
     case "cancel":
       fields(record, ["tag", "version", "requestId"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       uint64(record.requestId, true);
       break;
     case "shutdown":
       fields(record, ["tag", "version"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       break;
     default:
       invalid();
@@ -291,6 +311,59 @@ function point(value: unknown): void {
   const record = fields(value, ["x", "y"]);
   number(record.x);
   number(record.y);
+}
+
+function line(value: unknown): void {
+  const record = fields(value, ["start", "finish"]);
+  point(record.start);
+  point(record.finish);
+}
+
+function style(value: unknown): void {
+  const record = fields(value, ["fill", "stroke", "strokeWidth"]);
+  text(record.fill, 1, 128);
+  text(record.stroke, 1, 128);
+  number(record.strokeWidth, 0);
+}
+
+function sceneText(
+  value: unknown,
+  maxLines = 1024,
+  maxText: number = NATIVE_LIMITS.maxFrameBytes,
+): void {
+  const layout = fields(value, [
+    "bounds",
+    "lines",
+    "cellWidth",
+    "fontSize",
+    "lineHeight",
+    "fill",
+    "replacedCodeUnits",
+    "isTruncated",
+  ]);
+  bounds(layout.bounds);
+  for (const value of array(layout.lines, maxLines)) {
+    const line = fields(value, ["text", "x", "baseline", "width"]);
+    text(line.text, 0, maxText);
+    number(line.x);
+    number(line.baseline);
+    number(line.width, 0);
+  }
+  number(layout.cellWidth, 0);
+  number(layout.fontSize, 0);
+  number(layout.lineHeight, 0);
+  text(layout.fill, 1, 128);
+  integer(layout.replacedCodeUnits);
+  boolean(layout.isTruncated);
+}
+
+function gaps(value: unknown): void {
+  const record = fields(value, ["offsets", "band", "lines", "style", "legend"]);
+  for (const offset of array(record.offsets, NATIVE_LIMITS.maxSceneItems + 1)) number(offset);
+  bounds(record.band);
+  for (const value of array(record.lines, 2)) line(value);
+  style(record.style);
+  sceneText(record.legend, 1, 128);
 }
 
 function strings(value: unknown, max = 64): void {
@@ -405,36 +478,8 @@ function element(value: unknown): void {
     point(geometry.finish);
   } else invalid();
   bounds(record.bounds);
-  const style = fields(record.style, ["fill", "stroke", "strokeWidth"]);
-  text(style.fill, 1, 128);
-  text(style.stroke, 1, 128);
-  number(style.strokeWidth, 0);
-  if (record.text !== null) {
-    const layout = fields(record.text, [
-      "bounds",
-      "lines",
-      "cellWidth",
-      "fontSize",
-      "lineHeight",
-      "fill",
-      "replacedCodeUnits",
-      "isTruncated",
-    ]);
-    bounds(layout.bounds);
-    for (const value of array(layout.lines, 1024)) {
-      const line = fields(value, ["text", "x", "baseline", "width"]);
-      text(line.text);
-      number(line.x);
-      number(line.baseline);
-      number(line.width, 0);
-    }
-    number(layout.cellWidth, 0);
-    number(layout.fontSize, 0);
-    number(layout.lineHeight, 0);
-    text(layout.fill, 1, 128);
-    integer(layout.replacedCodeUnits);
-    boolean(layout.isTruncated);
-  }
+  style(record.style);
+  nullable(record.text, sceneText);
   nullable(record.source, source);
   boolean(record.isClipped);
 }
@@ -442,6 +487,8 @@ function element(value: unknown): void {
 function scene(value: unknown, snapshotId: unknown): void {
   const record = fields(value, [
     "schemaVersion",
+    "layout",
+    "gaps",
     "sceneId",
     "snapshotId",
     "bounds",
@@ -452,13 +499,14 @@ function scene(value: unknown, snapshotId: unknown): void {
     "status",
     "truncationReasons",
   ]);
-  equal(record.schemaVersion, 1);
+  equal(record.schemaVersion, 2);
+  member(record.layout, ["linear", "compact"]);
   uint64(record.sceneId, true);
   id(record.snapshotId);
   equal(record.snapshotId, snapshotId);
   bounds(record.bounds);
   const ids = new Set<string>();
-  for (const value of array(record.lanes, NATIVE_LIMITS.maxSceneItems)) {
+  for (const value of array(record.lanes, 64)) {
     const lane = fields(value, ["id", "runtime", "heap", "bounds"]);
     const laneId = text(lane.id, 1, 128);
     if (ids.has(laneId)) invalid();
@@ -470,6 +518,9 @@ function scene(value: unknown, snapshotId: unknown): void {
   const theme = fields(record.theme, ["background", "stroke", "text"]);
   for (const value of Object.values(theme)) text(value, 1, 128);
   redaction(record.redaction);
+  if (record.layout === "linear" || (record.redaction as RecordValue).addresses)
+    equal(record.gaps, null);
+  else nullable(record.gaps, gaps);
   integer(record.elementCount, 0, NATIVE_LIMITS.maxSceneItems);
   member(record.status, statuses);
   strings(record.truncationReasons);
@@ -560,7 +611,7 @@ export function parseNativeOutbound(value: unknown): NativeOutbound {
   switch (record.tag) {
     case "ready":
       fields(record, ["tag", "version", "capabilities"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       capabilities(record.capabilities);
       break;
     case "fatal":
@@ -570,13 +621,13 @@ export function parseNativeOutbound(value: unknown): NativeOutbound {
       break;
     case "success":
       fields(record, ["tag", "version", "requestId", "snapshotId", "result"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       uint64(record.requestId, true);
       result(record.result, record.snapshotId);
       break;
     case "error": {
       fields(record, ["tag", "version", "requestId", "snapshotId", "error"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       uint64(record.requestId, true);
       nullable(record.snapshotId, id);
       const error = fields(record.error, ["code", "message", "retryable"]);
@@ -587,7 +638,7 @@ export function parseNativeOutbound(value: unknown): NativeOutbound {
     }
     case "progress":
       fields(record, ["tag", "version", "requestId", "snapshotId", "phase", "completed"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       uint64(record.requestId, true);
       nullable(record.snapshotId, id);
       text(record.phase, 1, 64);
@@ -595,7 +646,7 @@ export function parseNativeOutbound(value: unknown): NativeOutbound {
       break;
     case "bye":
       fields(record, ["tag", "version"]);
-      equal(record.version, 2);
+      equal(record.version, NATIVE_VERSION);
       break;
     default:
       invalid();

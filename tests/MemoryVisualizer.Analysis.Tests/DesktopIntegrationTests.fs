@@ -3,7 +3,11 @@ namespace MemoryVisualizer.Analysis.Tests
 open System
 open System.Diagnostics
 open System.IO
+open System.Security.Cryptography
+open System.Text.RegularExpressions
+open System.Threading
 open System.Threading.Tasks
+open MemoryVisualizer.Cli
 open Xunit
 
 type DesktopFactAttribute() as this =
@@ -49,6 +53,39 @@ type DesktopIntegrationTests(fixture: GeneratedDump) =
                 let! _ = drains.WaitAsync(TimeSpan.FromSeconds(10.0))
                 Assert.True(child.ExitCode = 0, $"Desktop integration failed: {stdout.Tail}\n{stderr.Tail}")
                 Assert.Contains("Native desktop integration passed", stdout.Tail)
+                let exported = Regex.Match(stdout.Tail, "Native desktop SVG SHA256: ([0-9a-f]{64})")
+                Assert.True(exported.Success, "Desktop did not report its shared-engine export hash.")
+                let output = Path.Combine(fixture.Directory, "desktop-cli-equivalence.svg")
+                use cliOutput = new StringWriter()
+                use cliError = new StringWriter()
+
+                try
+                    let code =
+                        ExportCommand.run
+                            [|
+                                fixture.Path
+                                "--dac"
+                                fixture.Options.Dac.TrustedPaths[0]
+                                "--query"
+                                "MATCH (seg: Segment) RETURN seg AS BOX (Background = Blue, Width = 40);\n"
+                                + "MATCH (gen: Generation) RETURN gen.Generation AS BOX "
+                                + "(Label = gen.Generation, LabelPosition = InnerCenter, Background = Grey, Width = 24);"
+                                "--layout"
+                                "compact"
+                                "--max-elements"
+                                "1024"
+                                "--output"
+                                output
+                            |]
+                            cliOutput
+                            cliError
+                            CancellationToken.None
+
+                    Assert.True((code = 0), cliError.ToString())
+                    let hash = SHA256.HashData(File.ReadAllBytes output) |> Convert.ToHexStringLower
+                    Assert.Equal(exported.Groups[1].Value, hash)
+                finally
+                    File.Delete output
             finally
                 if not child.HasExited then
                     child.Kill(true)

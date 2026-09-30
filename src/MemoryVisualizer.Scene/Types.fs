@@ -43,6 +43,20 @@ type SceneText = {
     IsTruncated: bool
 }
 
+/// One positioned glyph, repeated with x translations; the legend is global.
+type SceneGapMarkers = {
+    Offsets: float list
+    Band: SceneBounds
+    Lines: (ScenePoint * ScenePoint) list
+    Style: ResolvedStyle
+    Legend: SceneText
+}
+
+[<RequireQualifiedAccess>]
+type SceneLayout =
+    | Linear
+    | Compact
+
 /// Strings are canonical decimal/hex, never JavaScript numbers or snapshot UUIDs.
 type SceneSource = {
     Runtime: int
@@ -167,6 +181,7 @@ type SceneOptions = {
     Redaction: RedactionPolicy
     Viewport: SceneViewport option
     PlotWidth: int
+    Layout: SceneLayout
 }
 
 [<RequireQualifiedAccess>]
@@ -177,6 +192,7 @@ module SceneOptions =
         Redaction = RedactionPolicy.none
         Viewport = None
         PlotWidth = 1024
+        Layout = SceneLayout.Linear
     }
 
 type SceneExecutionContext = {
@@ -200,6 +216,8 @@ type PositionedScene = internal {
     SceneBounds: SceneBounds
     SceneLanes: SceneLane list
     SceneElements: SceneElement list
+    SceneLayout: SceneLayout
+    SceneGaps: SceneGapMarkers option
     SceneTheme: SceneTheme
     SceneRedaction: RedactionPolicy
     SceneCompleteness: SceneCompleteness
@@ -210,6 +228,8 @@ type PositionedScene = internal {
     member this.Bounds = this.SceneBounds
     member this.Lanes = this.SceneLanes
     member this.Elements = this.SceneElements
+    member this.Layout = this.SceneLayout
+    member this.Gaps = this.SceneGaps
     member this.Theme = this.SceneTheme
     member this.Redaction = this.SceneRedaction
     member this.Completeness = this.SceneCompleteness

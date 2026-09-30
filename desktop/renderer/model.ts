@@ -46,6 +46,7 @@ export const TEMPLATES = [
 ] as const;
 
 export type SettingsDraft = {
+  layout: SceneSettings["layout"];
   plotWidth: string;
   maxResults: string;
   maxElements: string;
@@ -57,6 +58,7 @@ export type SettingsDraft = {
 
 export function draftSettings(settings: SceneSettings = DEFAULT_SETTINGS): SettingsDraft {
   return {
+    layout: settings.layout,
     plotWidth: String(settings.plotWidth),
     maxResults: String(settings.maxResults),
     maxElements: String(settings.maxElements),
@@ -96,6 +98,8 @@ export function boundedInteger(
 }
 
 export function readSettings(draft: SettingsDraft): SceneSettings {
+  if (draft.layout !== "linear" && draft.layout !== "compact")
+    throw new Error("Address layout must be compact or linear.");
   const viewport = draft.viewportEnabled
     ? {
         start: canonicalUint64(draft.viewportStart, "Viewport start"),
@@ -106,6 +110,7 @@ export function readSettings(draft: SettingsDraft): SceneSettings {
     throw new Error("Viewport end must not exceed 2^64.");
   }
   return {
+    layout: draft.layout,
     plotWidth: boundedInteger(draft.plotWidth, 64, 4096, "Plot width"),
     maxResults: boundedInteger(draft.maxResults, 1, NATIVE_LIMITS.maxResults, "Maximum results"),
     maxElements: boundedInteger(

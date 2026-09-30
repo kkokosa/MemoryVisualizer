@@ -20,11 +20,11 @@ let private text name value = (property name value).GetString()
 let private scope = "6ee40211-7b2b-48b2-a2ed-43549d709620"
 
 let private settings =
-    """{"plotWidth":1024,"viewport":null,"redaction":{"addresses":false,"strings":false,"paths":false,"labels":false},"maxResults":4096,"maxElements":1024}"""
+    """{"layout":"compact","plotWidth":1024,"viewport":null,"redaction":{"addresses":false,"strings":false,"paths":false,"labels":false},"maxResults":4096,"maxElements":1024}"""
 
 let private request id snapshot operation args =
     let scope = if snapshot then "\"" + scope + "\"" else "null"
-    $"{{\"tag\":\"request\",\"version\":2,\"requestId\":\"{id}\",\"snapshotId\":{scope},\"operation\":\"{operation}\",\"args\":{args}}}"
+    $"{{\"tag\":\"request\",\"version\":3,\"requestId\":\"{id}\",\"snapshotId\":{scope},\"operation\":\"{operation}\",\"args\":{args}}}"
 
 let private dumpPath = Path.GetFullPath("synthetic-only.dmp")
 
@@ -200,15 +200,23 @@ type private Session(readSnapshot, ?sceneClock: TimeProvider) =
 
     member this.Start() =
         task {
-            do! this.Send """{"tag":"hello","versions":[2],"extensions":[]}"""
+            do! this.Send """{"tag":"hello","versions":[3],"extensions":[]}"""
             let! ready = this.Read()
+            Assert.Equal(3, (property "version" ready).GetInt32())
+            Assert.Equal(2, (ready |> property "capabilities" |> property "sceneSchemaVersion").GetInt32())
+
+            Assert.Equal(
+                """["linear","compact"]""",
+                (ready |> property "capabilities" |> property "layouts").GetRawText()
+            )
+
             Assert.Equal("native", ready |> property "capabilities" |> text "backend")
             Assert.Equal(7, (ready |> property "capabilities" |> property "operations").GetArrayLength())
         }
 
     member this.Stop() =
         task {
-            do! this.Send """{"tag":"shutdown","version":2}"""
+            do! this.Send """{"tag":"shutdown","version":3}"""
             let! bye = this.Terminal()
             Assert.Equal("bye", text "tag" bye)
             let! code = running.WaitAsync(TimeSpan.FromSeconds(3.0))
@@ -230,20 +238,20 @@ let private synthetic _ options _ _ =
     Task.FromResult(Ok(fixture ()))
 
 [<Theory>]
-[<InlineData("""{"tag":"hello","versions":[2.0],"extensions":[]}""")>]
-[<InlineData("""{"tag":"hello","versions":[2],"extensions":[],"unknown":0}""")>]
-[<InlineData("""{"tag":"hello","tag":"hello","versions":[2],"extensions":[]}""")>]
-[<InlineData("""{"tag":"cancel","version":2,"requestId":"01"}""")>]
-[<InlineData("""{"tag":"cancel","version":2,"requestId":"18446744073709551616"}""")>]
-[<InlineData("""{"tag":"cancel","version":2,"requestId":"\ud800"}""")>]
-[<InlineData("""{"tag":"shutdown","version":2e0}""")>]
+[<InlineData("""{"tag":"hello","versions":[3.0],"extensions":[]}""")>]
+[<InlineData("""{"tag":"hello","versions":[3],"extensions":[],"unknown":0}""")>]
+[<InlineData("""{"tag":"hello","tag":"hello","versions":[3],"extensions":[]}""")>]
+[<InlineData("""{"tag":"cancel","version":3,"requestId":"01"}""")>]
+[<InlineData("""{"tag":"cancel","version":3,"requestId":"18446744073709551616"}""")>]
+[<InlineData("""{"tag":"cancel","version":3,"requestId":"\ud800"}""")>]
+[<InlineData("""{"tag":"shutdown","version":3e0}""")>]
 [<InlineData("""{"tag":"shutdown","version":-0}""")>]
 let ``Native grammar rejects noncanonical or ambiguous frames`` (raw: string) =
     Assert.Throws<ProtocolFailure>(fun () -> NativeProtocol.parseInbound (Protocol.utf8.GetBytes raw) |> ignore)
     |> ignore
 
 [<Fact>]
-let ``V1 and V2 remain deliberately disjoint`` () =
+let ``V1 and V3 remain deliberately disjoint and native V2 is rejected`` () =
     let native = NativeProtocol.ready ()
     NativeProtocol.validateOutbound native
 
@@ -251,6 +259,20 @@ let ``V1 and V2 remain deliberately disjoint`` () =
     |> ignore
 
     Assert.Throws<ProtocolFailure>(fun () -> NativeProtocol.validateOutbound (Protocol.ready ()))
+    |> ignore
+
+    for raw in
+        [
+            """{"tag":"hello","versions":[2],"extensions":[]}"""
+            """{"tag":"shutdown","version":2}"""
+            """{"tag":"cancel","version":2,"requestId":"1"}"""
+            (load "1").Replace("\"version\":3", "\"version\":2")
+        ] do
+        Assert.Throws<ProtocolFailure>(fun () -> NativeProtocol.parseInbound (Protocol.utf8.GetBytes raw) |> ignore)
+        |> ignore
+
+    Assert.Throws<ProtocolFailure>(fun () ->
+        NativeProtocol.validateOutbound (Protocol.utf8.GetBytes """{"tag":"bye","version":2}"""))
     |> ignore
 
     let oversized = Array.create 65537 32uy
@@ -264,9 +286,77 @@ let ``V1 and V2 remain deliberately disjoint`` () =
     |> ignore
 
 [<Fact>]
-let ``Native pipeline pages shared MQL rows scene coordinates details and SVG`` () =
+let ``Native settings require exact explicit layout and map to shared options`` () =
+    for name, expected in [ "linear", SceneLayout.Linear; "compact", SceneLayout.Compact ] do
+        let bytes =
+            (run "1" "MATCH (o:Object) RETURN o").Replace("\"compact\"", "\"" + name + "\"")
+            |> Protocol.utf8.GetBytes
+
+        match NativeProtocol.parseInbound bytes with
+        | NativeInbound.Request {
+                                    Operation = NativeOperation.Run(_, settings)
+                                } -> Assert.Equal(expected, settings.Scene.Layout)
+        | _ -> failwith "Expected query request"
+
+    for changed in
+        [
+            settings.Replace("\"layout\":\"compact\",", "")
+            settings.Replace("\"compact\"", "\"auto\"")
+            settings.Replace("\"compact\"", "\"Compact\"")
+            settings.Replace("\"compact\"", "null")
+            settings.Replace("\"compact\"", "1")
+        ] do
+        let bytes =
+            (run "1" "MATCH (o:Object) RETURN o").Replace(settings, changed)
+            |> Protocol.utf8.GetBytes
+
+        Assert.Throws<ProtocolFailure>(fun () -> NativeProtocol.parseInbound bytes |> ignore)
+        |> ignore
+
+[<Theory>]
+[<InlineData("linear", false)>]
+[<InlineData("compact", false)>]
+[<InlineData("compact", true)>]
+let ``Native pipeline pages shared sparse layout geometry details and identical SVG`` (layout: string) redactAddresses =
     task {
-        use session = new Session(synthetic)
+        let original = fixture ()
+        let shift = 0x100000000UL
+
+        let raw = {
+            original with
+                Objects =
+                    original.Objects
+                    |> Array.mapi (fun index item ->
+                        if index < 20 then
+                            item
+                        else
+                            {
+                                item with
+                                    Identity = {
+                                        item.Identity with
+                                            Address = item.Identity.Address + shift
+                                    }
+                            })
+                Segments =
+                    original.Segments
+                    |> Array.map (fun segment -> {
+                        segment with
+                            ObjectRange = {
+                                segment.ObjectRange with
+                                    End = segment.ObjectRange.End + shift
+                            }
+                            CommittedRange = {
+                                segment.CommittedRange with
+                                    End = segment.CommittedRange.End + shift
+                            }
+                            ReservedRange = {
+                                Start = segment.ReservedRange.Start + shift
+                                End = segment.ReservedRange.End + shift
+                            }
+                    })
+        }
+
+        use session = new Session(fun _ _ _ _ -> Task.FromResult(Ok raw))
         do! session.Start()
         do! session.Send(load "1")
         let! loaded = session.Terminal()
@@ -276,13 +366,34 @@ let ``Native pipeline pages shared MQL rows scene coordinates details and SVG`` 
         let source =
             "MATCH (o: Object) RETURN o.Address, o.Size, o.Type AS BOX (Label = o.Type)"
 
-        do! session.Send(run "2" source)
+        let query = (run "2" source).Replace("\"compact\"", "\"" + layout + "\"")
+
+        let query =
+            if redactAddresses then
+                query.Replace("\"addresses\":false", "\"addresses\":true")
+            else
+                query
+
+        do! session.Send query
         let! result = session.Terminal()
         let result = property "result" result
         Assert.Equal("complete", text "status" result)
         Assert.Equal(40, (property "rowCount" result).GetInt32())
         Assert.Equal("1", text "queryId" result)
         Assert.Equal(40, (result |> property "scene" |> property "elementCount").GetInt32())
+        let header = property "scene" result
+        Assert.Equal(2, (property "schemaVersion" header).GetInt32())
+        Assert.Equal(layout, text "layout" header)
+        let gapDto = property "gaps" header
+
+        if layout = "compact" && not redactAddresses then
+            Assert.Equal(JsonValueKind.Object, gapDto.ValueKind)
+            Assert.True((property "offsets" gapDto).GetArrayLength() > 0)
+            Assert.Equal(2, (property "lines" gapDto).GetArrayLength())
+            Assert.Equal(1, (gapDto |> property "legend" |> property "lines").GetArrayLength())
+        else
+            Assert.Equal(JsonValueKind.Null, gapDto.ValueKind)
+
         do! session.Send(rows "3" "1" "null")
         let! first = session.Terminal()
         Assert.Equal(32, (first |> property "result" |> property "items").GetArrayLength())
@@ -300,7 +411,6 @@ let ``Native pipeline pages shared MQL rows scene coordinates details and SVG`` 
         Assert.Equal(JsonValueKind.Null, (second |> property "result" |> property "nextCursor").ValueKind)
         do! session.Send(request "5" true "scene.page" """{"sceneId":"1","cursor":null,"pageSize":32}""")
         let! elements = session.Terminal()
-        let raw = fixture ()
 
         use store =
             IndexedHeapSnapshot.Create(raw, SnapshotIndexLimits.defaults, CancellationToken.None)
@@ -318,6 +428,15 @@ let ``Native pipeline pages shared MQL rows scene coordinates details and SVG`` 
             (Scene.build
                 {
                     SceneOptions.defaults with
+                        Layout =
+                            if layout = "compact" then
+                                SceneLayout.Compact
+                            else
+                                SceneLayout.Linear
+                        Redaction = {
+                            RedactionPolicy.none with
+                                Addresses = redactAddresses
+                        }
                         Limits = {
                             SceneLimits.defaults with
                                 MaxElements = 1024
@@ -330,10 +449,31 @@ let ``Native pipeline pages shared MQL rows scene coordinates details and SVG`` 
         let actual = (elements |> property "result" |> property "items")[0]
         Assert.Equal(expectedScene.Elements[0].Bounds.X, (actual |> property "bounds" |> property "x").GetDouble())
 
-        Assert.Equal(
-            expectedScene.Elements[0].Text.Value.Lines[0].Text,
-            ((actual |> property "text" |> property "lines")[0] |> text "text")
-        )
+        match expectedScene.Elements[0].Text with
+        | Some label ->
+            Assert.Equal(label.Lines[0].Text, ((actual |> property "text" |> property "lines")[0] |> text "text"))
+        | None -> Assert.Equal(JsonValueKind.Null, (property "text" actual).ValueKind)
+
+        if redactAddresses then
+            Assert.Equal(JsonValueKind.Null, (property "source" actual).ValueKind)
+
+        for index in 0..31 do
+            let expected =
+                NativeJson.element expectedScene.Elements[index] |> JsonSerializer.Serialize
+
+            Assert.Equal(expected, ((elements |> property "result" |> property "items")[index]).GetRawText())
+
+        match expectedScene.Gaps with
+        | Some gaps ->
+            Assert.Equal<float>(gaps.Offsets, (property "offsets" gapDto).EnumerateArray() |> Seq.map _.GetDouble())
+        | None -> Assert.Equal(JsonValueKind.Null, gapDto.ValueKind)
+
+        if layout = "linear" then
+            let defaultScene =
+                (Scene.build SceneOptions.defaults expectedResult (SceneExecutionContext.create CancellationToken.None))
+                    .Scene.Value
+
+            Assert.Equal<SceneElement>(defaultScene.Elements, expectedScene.Elements)
 
         do!
             session.Send(
@@ -371,6 +511,92 @@ let ``Native pipeline pages shared MQL rows scene coordinates details and SVG`` 
 
         do! session.Stop()
     }
+
+[<Fact>]
+let ``Actual native compact header packs 1025 offsets and 64 lanes below 64 KiB`` () =
+    let snapshot = SnapshotId.create (Guid.Parse scope) |> unwrap
+
+    let result: QueryResult = {
+        SnapshotId = snapshot
+        Status = QueryStatus.Complete
+        SourcePartial = false
+        SourceAvailable = true
+        SourceDiagnostics = [||]
+        Rows = []
+        Candidates = 1024
+        Directives =
+            List.init 1024 (fun index -> {
+                StatementIndex = 0
+                Kind = DrawingKind.Box
+                Runtime = { SnapshotId = snapshot; Index = 0 }
+                Heap = index % 64
+                Address = uint64 (index + 1) * 1000UL
+                Size = 24UL
+                Entity = None
+                Label = None
+                LabelPosition = LabelPosition.InnerCenter
+                Background = "#ffffff"
+                Width = 1
+            })
+    }
+
+    let options = {
+        SceneOptions.defaults with
+            Layout = SceneLayout.Compact
+            Viewport = Some { Start = 0UL; Size = 1026000UL }
+            Limits = {
+                SceneLimits.defaults with
+                    MaxElements = 1024
+            }
+    }
+
+    let built =
+        Scene.build options result (SceneExecutionContext.create CancellationToken.None)
+
+    Assert.Equal(SceneStatus.Complete, built.Status)
+    let scene = built.Scene.Value
+    Assert.Equal(1024, scene.Elements.Length)
+    Assert.Equal(64, scene.Lanes.Length)
+    Assert.Equal(1025, scene.Gaps.Value.Offsets.Length)
+    Assert.Equal(2, scene.Gaps.Value.Lines.Length)
+    Assert.Single(scene.Gaps.Value.Legend.Lines) |> ignore
+
+    let request = {
+        Id = 1UL
+        Snapshot = Some scope
+        Operation = NativeOperation.Dispose
+    }
+
+    let bytes =
+        NativeProtocol.success request request.Snapshot (NativeJson.queryInfo 1UL 1UL result (Some scene))
+
+    Assert.True(bytes.Length < 65536, $"Actual compact header is {bytes.Length} bytes")
+    use document = JsonDocument.Parse(ReadOnlyMemory<byte>(bytes))
+    let header = document.RootElement |> property "result" |> property "scene"
+    Assert.Equal(1025, (header |> property "gaps" |> property "offsets").GetArrayLength())
+    Assert.Equal(64, (property "lanes" header).GetArrayLength())
+
+    Assert.Equal(
+        "band,legend,lines,offsets,style",
+        (property "gaps" header).EnumerateObject()
+        |> Seq.map _.Name
+        |> Seq.sort
+        |> String.concat ","
+    )
+
+    let oversized =
+        NativeJson.sceneInfo 1UL scene
+        |> JsonSerializer.Serialize
+        |> fun value ->
+            box {|
+                scene = value
+                padding = String('x', 65536)
+            |}
+
+    let overflow =
+        Assert.Throws<NativeFailure>(fun () -> NativeProtocol.success request request.Snapshot oversized |> ignore)
+
+    Assert.Equal(NativeFailure "OutputLimit", overflow)
 
 [<Fact>]
 let ``New query invalidates old identifiers and compiler diagnostics remain source spanned`` () =
@@ -478,11 +704,11 @@ let ``Cancelled replacement preserves previous store query and scene while nativ
         let! _ = session.Terminal()
         do! session.Send(load "3")
         do! entered.Task.WaitAsync(TimeSpan.FromSeconds(2.0))
-        do! session.SendMany [ load "4"; """{"tag":"cancel","version":2,"requestId":"3"}""" ]
+        do! session.SendMany [ load "4"; """{"tag":"cancel","version":3,"requestId":"3"}""" ]
         let! busy = session.Terminal()
         Assert.Equal("Busy", busy |> property "error" |> text "code")
         let nextRead = session.Input.ReadCalls + 1
-        do! session.Send """{"tag":"cancel","version":2,"requestId":"3"}"""
+        do! session.Send """{"tag":"cancel","version":3,"requestId":"3"}"""
         do! session.Input.WaitForRead(nextRead).WaitAsync(TimeSpan.FromSeconds(1.0))
         release.TrySetResult(()) |> ignore
         let! cancelled = session.Terminal()
@@ -634,7 +860,7 @@ let ``Extraction progress is coalesced to newest counter and cancellation remain
         Assert.Equal("10000", text "completed" progress)
         Assert.Equal("MemoryMap", text "phase" progress)
         Assert.False(progress.TryGetProperty("total") |> fst)
-        do! session.Send """{"tag":"cancel","version":2,"requestId":"1"}"""
+        do! session.Send """{"tag":"cancel","version":3,"requestId":"1"}"""
         let! cancelled = session.Terminal()
         Assert.Equal("Cancelled", cancelled |> property "error" |> text "code")
         do! session.Stop()
@@ -916,7 +1142,7 @@ let ``Cancellation after commit before reply visibility preserves authoritative 
                 Assert.True(File.Exists target)
 
             let nextRead = session.Input.ReadCalls + 1
-            do! session.Send """{"tag":"cancel","version":2,"requestId":"3"}"""
+            do! session.Send """{"tag":"cancel","version":3,"requestId":"3"}"""
             do! session.Input.WaitForRead(nextRead).WaitAsync(TimeSpan.FromSeconds(1.0))
             session.Output.Resume()
             let! committed = session.Terminal()

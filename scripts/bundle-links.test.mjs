@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   cp,
   mkdir,
   mkdtemp,
   readFile,
   readlink,
+  readdir,
   rename,
   rm,
   symlink,
@@ -12,8 +14,34 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { assertContainedSymlinks } from "./bundle-links.mjs";
+
+test("alternate workspace destinations never replace existing files or folders", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "memoryvisualizer-bundle-output-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = join(root, "preserved.txt");
+  await writeFile(file, "running build");
+  const script = fileURLToPath(new URL("./build-workspace.mjs", import.meta.url));
+  for (const destination of [root, file]) {
+    const result = spawnSync(process.execPath, [script, "--output", destination], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.status, 0);
+    assert.ok(result.stderr.includes(`Output already exists: ${destination}`));
+  }
+  const empty = spawnSync(process.execPath, [script, "--output", ""], {
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.notEqual(empty.status, 0);
+  assert.match(empty.stderr, /Output path must not be empty/);
+  assert.deepEqual(await readdir(root), ["preserved.txt"]);
+  assert.equal(await readFile(file, "utf8"), "running build");
+});
 
 test("ordinary bundle files pass containment", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memoryvisualizer-bundle-"));

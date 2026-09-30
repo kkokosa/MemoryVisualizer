@@ -57,6 +57,7 @@ export function canExportCurrentScene(
     return false;
   try {
     const parsed = readSettings(settings);
+    if (result.scene.layout !== parsed.layout) return false;
     for (const flag of ["addresses", "strings", "paths", "labels"] as const) {
       if (result.scene.redaction[flag] !== parsed.redaction[flag]) return false;
     }

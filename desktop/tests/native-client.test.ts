@@ -55,7 +55,7 @@ const details = {
   args: { runtime: 0, address: entity.address, cursor: null, pageSize: 1 },
 } as const;
 
-// This is an in-memory native v2 peer, not a reinterpretation of the v1 fixture backend.
+// This is an in-memory native v3 peer, not a reinterpretation of the v1 fixture backend.
 class NativePeer extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
@@ -85,7 +85,7 @@ class NativePeer extends EventEmitter {
           if (frame.tag === "shutdown" && this.autoShutdown)
             queueMicrotask(() => {
               for (const pending of this.active.values()) this.error(pending, "Cancelled");
-              this.send({ tag: "bye", version: 2 });
+              this.send({ tag: "bye", version: 3 });
               this.exit(0);
             });
         }
@@ -101,8 +101,14 @@ class NativePeer extends EventEmitter {
   ready(): void {
     this.send({
       tag: "ready",
-      version: 2,
-      capabilities: { backend: "native", operations: NATIVE_OPERATIONS, limits: NATIVE_LIMITS },
+      version: 3,
+      capabilities: {
+        backend: "native",
+        sceneSchemaVersion: 2,
+        layouts: ["linear", "compact"],
+        operations: NATIVE_OPERATIONS,
+        limits: NATIVE_LIMITS,
+      },
     });
   }
 
@@ -111,7 +117,7 @@ class NativePeer extends EventEmitter {
     this.active.delete(pending.requestId);
     this.send({
       tag: "success",
-      version: 2,
+      version: 3,
       requestId: pending.requestId,
       snapshotId: scope ?? pending.snapshotId,
       result,
@@ -123,7 +129,7 @@ class NativePeer extends EventEmitter {
     this.active.delete(pending.requestId);
     this.send({
       tag: "error",
-      version: 2,
+      version: 3,
       requestId: pending.requestId,
       snapshotId: pending.snapshotId,
       error: { code, message: `Native ${code}.`, retryable: false },
@@ -154,7 +160,7 @@ function setup(t: TestContext, ready = true): { client: NativeClient; peer: Nati
     ["--protocol", "--backend=native"],
     { shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
   ]);
-  assert.deepEqual(peer.frames, [{ tag: "hello", versions: [2], extensions: [] }]);
+  assert.deepEqual(peer.frames, [{ tag: "hello", versions: [3], extensions: [] }]);
   t.after(async () => {
     if (!peer.kills.length) await client.close();
     else await client.exited;
@@ -190,7 +196,9 @@ function queryResult(id = queryId, count = 2): NativeResult {
     truncationReasons: [],
     diagnostics: [],
     scene: {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      layout: "compact",
+      gaps: null,
       sceneId,
       snapshotId,
       bounds,
@@ -211,7 +219,7 @@ async function queried(client: NativeClient, peer: NativePeer): Promise<void> {
   await handle.result;
 }
 
-test("native owner negotiates v2, bounds admission before writing and closes exactly once", async (t) => {
+test("native owner negotiates v3, bounds admission before writing and closes exactly once", async (t) => {
   const { client, peer } = setup(t);
   await loaded(client, peer);
   const pending = Array.from({ length: 8 }, () => client.request(details));
@@ -228,6 +236,71 @@ test("native owner negotiates v2, bounds admission before writing and closes exa
   assert.equal(peer.kills.length, 0);
   assert.equal(client.activeSnapshot, null);
   assert.throws(() => client.request(load), { code: "WorkerExited" });
+});
+
+test("old native v2 cannot negotiate the native v3 connection", async (t) => {
+  const { client, peer } = setup(t, false);
+  const rejected = assert.rejects(client.ready, { code: "ProtocolError" });
+  peer.send({
+    tag: "ready",
+    version: 2,
+    capabilities: { backend: "native", operations: NATIVE_OPERATIONS, limits: NATIVE_LIMITS },
+  });
+  await rejected;
+  assert.deepEqual(peer.kills, ["SIGKILL"]);
+});
+
+for (const mismatch of ["compact-to-linear", "linear-to-compact", "redaction"] as const)
+  test(`native owner rejects a scene with mismatched ${mismatch} settings`, async (t) => {
+    const { client, peer } = setup(t);
+    await loaded(client, peer);
+    const layout = mismatch === "linear-to-compact" ? "linear" : "compact";
+    const handle = client.request({
+      ...run,
+      args: { ...run.args, settings: { ...DEFAULT_SETTINGS, layout } },
+    });
+    const rejected = assert.rejects(handle.result, { code: "ProtocolError" });
+    const result = queryResult();
+    assert.equal(result.tag, "query");
+    assert.ok(result.scene);
+    if (mismatch === "redaction")
+      result.scene.redaction = { ...result.scene.redaction, addresses: true };
+    else result.scene.layout = layout === "compact" ? "linear" : "compact";
+    peer.success(handle.requestId, result);
+    await rejected;
+    assert.deepEqual(peer.kills, ["SIGKILL"]);
+    assert.equal(client.activeSnapshot, null);
+    const before = peer.frames.length;
+    assert.throws(
+      () =>
+        client.request({
+          operation: "export",
+          snapshotId,
+          args: { sceneId, path: "C:\\wrong-layout.svg" },
+        }),
+      { code: "ProtocolError" },
+    );
+    assert.equal(peer.frames.length, before);
+  });
+
+test("native requests require an explicit layout before writing or invalidating current IDs", async (t) => {
+  const { client, peer } = setup(t);
+  await queried(client, peer);
+  const before = peer.frames.length;
+  for (const layout of [undefined, "auto"]) {
+    const settings = { ...DEFAULT_SETTINGS, layout } as unknown as typeof DEFAULT_SETTINGS;
+    assert.throws(() => client.request({ ...run, args: { ...run.args, settings } }), {
+      code: "ProtocolViolation",
+    });
+  }
+  assert.equal(peer.frames.length, before);
+  const exported = client.request({
+    operation: "export",
+    snapshotId,
+    args: { sceneId, path: "C:\\old.svg" },
+  });
+  peer.success(exported.requestId, { tag: "export", byteLength: "1" });
+  await exported.result;
 });
 
 test("failed replacement preserves the previous snapshot, query and exportable scene", async (t) => {
@@ -396,7 +469,7 @@ test("query replacement invalidates in-flight pages, progress and old scene/expo
   client.on("progress", (frame) => progress.push(frame));
   peer.send({
     tag: "progress",
-    version: 2,
+    version: 3,
     requestId: page.requestId,
     snapshotId,
     phase: "page",
@@ -556,7 +629,7 @@ test("native progress flooding is bounded and cancelled progress cannot leak", a
   for (let i = 0; i < 100; i++)
     peer.send({
       tag: "progress",
-      version: 2,
+      version: 3,
       requestId: handle.requestId,
       snapshotId,
       phase: "query",
@@ -567,7 +640,7 @@ test("native progress flooding is bounded and cancelled progress cannot leak", a
   client.cancel(handle.requestId);
   peer.send({
     tag: "progress",
-    version: 2,
+    version: 3,
     requestId: handle.requestId,
     snapshotId,
     phase: "query",
@@ -737,7 +810,7 @@ for (const [name, result] of [
       args: { queryId, cursor: null, pageSize: 1 },
     });
     const rejected = assert.rejects(handle.result, { code: "ProtocolError" });
-    peer.send({ tag: "success", version: 2, requestId: handle.requestId, snapshotId, result });
+    peer.send({ tag: "success", version: 3, requestId: handle.requestId, snapshotId, result });
     await rejected;
     await client.exited;
     assert.deepEqual(peer.kills, ["SIGKILL"]);
@@ -764,7 +837,7 @@ for (const name of ["unknown ID", "wrong scope", "wrong tag", "nested wrong scop
     const rejected = assert.rejects(handle.result, { code: "ProtocolError" });
     peer.send({
       tag: "success",
-      version: 2,
+      version: 3,
       requestId: name === "unknown ID" ? "999" : handle.requestId,
       snapshotId: name === "wrong scope" ? nextSnapshotId : snapshotId,
       result:
@@ -858,7 +931,7 @@ test("a fake backend cannot negotiate the native connection", async (t) => {
   const rejected = assert.rejects(client.ready, { code: "ProtocolError" });
   peer.send({
     tag: "ready",
-    version: 2,
+    version: 3,
     capabilities: { backend: "fake", operations: NATIVE_OPERATIONS, limits: NATIVE_LIMITS },
   });
   await rejected;

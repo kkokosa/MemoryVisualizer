@@ -28,6 +28,7 @@ import type {
   DesktopValue,
   NativeResult,
   SceneElement,
+  SceneGapMarkers,
   SceneInfo,
   WorkspaceAPI,
 } from "../src/native-types.js";
@@ -65,7 +66,9 @@ const document = {
 } as unknown as Document;
 const bounds = { x: 0, y: 0, width: 1600, height: 144 };
 const scene: SceneInfo = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  layout: "compact",
+  gaps: null,
   sceneId: "scene-1",
   snapshotId: "snapshot-1",
   bounds,
@@ -113,6 +116,76 @@ function nodes(root: TestNode): TestNode[] {
 function render(info: SceneInfo = scene, items: SceneElement[] = [element]) {
   return createSceneSvg(document, info, items) as unknown as TestNode;
 }
+
+const gaps: SceneGapMarkers = {
+  offsets: [620.25, 941.75],
+  band: { x: 0, y: 16, width: 12, height: 96 },
+  lines: [
+    { start: { x: 2, y: 8 }, finish: { x: 5, y: 14 } },
+    { start: { x: 7, y: 8 }, finish: { x: 10, y: 14 } },
+  ],
+  style: { fill: "#eeeeee", stroke: "#606060", strokeWidth: 1 },
+  legend: {
+    bounds: { x: 528, y: 120, width: 320, height: 14 },
+    lines: [{ text: "// Compressed address gaps", x: 528, baseline: 131, width: 200 }],
+    cellWidth: 8,
+    fontSize: 12,
+    lineHeight: 14,
+    fill: "#202020",
+    replacedCodeUnits: 0,
+    isTruncated: false,
+  },
+};
+
+test("new scenes default to compact while explicit linear settings round trip", () => {
+  assert.equal(readSettings(draftSettings()).layout, "compact");
+  const linear = { ...readSettings(draftSettings()), layout: "linear" as const };
+  assert.deepEqual(readSettings(draftSettings(linear)), linear);
+});
+
+test("gap glyphs use only shared positioned primitives and never become selectable source elements", () => {
+  const tree = render({ ...scene, gaps });
+  const all = nodes(tree);
+  assert.equal(tree.attributes.get("data-scene-version"), "2");
+  assert.equal(tree.attributes.get("data-address-layout"), "compact");
+  const markers = all.filter((node) => node.attributes.get("data-kind") === "address-gap");
+  assert.deepEqual(
+    markers.map((node) => node.attributes.get("transform")),
+    ["translate(620.25,0)", "translate(941.75,0)"],
+  );
+  for (const marker of markers) {
+    assert.equal(marker.attributes.has("data-element-id"), false);
+    assert.equal(marker.attributes.has("data-address"), false);
+    assert.equal(marker.attributes.has("tabindex"), false);
+    assert.equal(marker.listeners.size, 0);
+    assert.equal(marker.children[0]?.attributes.get("width"), "12");
+    assert.equal(marker.children[1]?.attributes.get("x1"), "2");
+    assert.equal(marker.children[1]?.attributes.get("y2"), "14");
+    assert.equal(marker.children[1]?.attributes.get("stroke"), "#606060");
+  }
+  const legend = all.filter((node) => node.tag === "text" && node.textContent.startsWith("//"));
+  assert.equal(legend.length, 1);
+  assert.equal(legend[0]?.attributes.get("x"), "528");
+  assert.equal(legend[0]?.attributes.get("y"), "131");
+  assert.equal(legend[0]?.attributes.get("textLength"), "200");
+  const bounded = render(
+    { ...scene, gaps: { ...gaps, offsets: Array.from({ length: 2000 }, (_, i) => i) } },
+    [],
+  );
+  assert.equal(
+    nodes(bounded).filter((node) => node.attributes.get("data-kind") === "address-gap").length,
+    1025,
+  );
+  assert.ok(nodes(bounded).length < 4200);
+  for (const hidden of [
+    { ...scene, gaps, layout: "linear" as const },
+    { ...scene, gaps, redaction: { ...scene.redaction, addresses: true } },
+  ]) {
+    const rendered = nodes(render(hidden));
+    assert.ok(rendered.every((node) => node.attributes.get("data-kind") !== "address-gap"));
+    assert.ok(rendered.every((node) => !node.textContent.startsWith("//")));
+  }
+});
 
 test("uint64 inputs are canonicalized losslessly and invalid ranges are rejected", () => {
   assert.equal(canonicalUint64("0xffffffffffffffff"), "18446744073709551615");
@@ -255,7 +328,7 @@ test("scene paging stops at 32 pages and 1024 items without fetching the whole h
           kind: "native",
           value: {
             tag: "success",
-            version: 2,
+            version: 3,
             requestId: String(calls),
             snapshotId: "snapshot-1",
             result: {
@@ -288,7 +361,7 @@ test("stale generation discards in-flight scene pages and prevents another reque
           kind: "native",
           value: {
             tag: "success",
-            version: 2,
+            version: 3,
             requestId: "1",
             snapshotId: "snapshot-1",
             result: { tag: "elements", sceneId: "scene-1", items: [element], nextCursor: "next" },
@@ -313,7 +386,7 @@ test("paging rejects wrong scene IDs, oversized pages and repeated cursors", asy
       kind: "native",
       value: {
         tag: "success",
-        version: 2,
+        version: 3,
         requestId: "1",
         snapshotId: "snapshot-1",
         result: { tag: "elements", sceneId: id, items, nextCursor: next },
@@ -522,6 +595,26 @@ test("export rejects redaction changes until a matching redacted rerun; view-onl
     scene,
   };
   assert.equal(canExportCurrentScene(result, basis, "query", settings, 1), true);
+  const linear = { ...settings, layout: "linear" as const };
+  assert.equal(canExportCurrentScene(result, basis, "query", linear, 1), false);
+  const linearBasis = annotationBasis("query", linear, 1);
+  assert.equal(canExportCurrentScene(result, linearBasis, "query", linear, 1), false);
+  assert.equal(
+    canExportCurrentScene(
+      { ...result, scene: { ...scene, layout: "linear" } },
+      linearBasis,
+      "query",
+      linear,
+      1,
+    ),
+    true,
+  );
+  const noted: AnnotationScope = {
+    basis,
+    attached: [{ elementId: "element-0", text: "Compact view note" }],
+    detached: [],
+  };
+  assert.equal(changeAnnotationBasis(noted, linearBasis, "Layout changed").attached.length, 0);
   const redacted = { ...settings, redaction: { ...settings.redaction, addresses: true } };
   assert.equal(canExportCurrentScene(result, basis, "query", redacted, 1), false);
   const redactedBasis = annotationBasis("query", redacted, 1);

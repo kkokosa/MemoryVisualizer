@@ -10,6 +10,20 @@ open MemoryVisualizer.Query
 exception private SceneFailure of SceneDiagnostic
 exception private SceneStopped of SceneTruncation
 
+type private CompactRange = {
+    Start: bigint
+    Prefix: bigint
+    GapCount: int
+}
+
+type private CompactLayout = {
+    Ranges: CompactRange array
+    Bytes: bigint
+    DataWidth: float
+    GapWidth: float
+    Offsets: float list
+}
+
 [<RequireQualifiedAccess>]
 module Scene =
     let private invariant = CultureInfo.InvariantCulture
@@ -45,8 +59,9 @@ module Scene =
                 || obj.ReferenceEquals(options.Limits, null)
                 || obj.ReferenceEquals(options.Theme, null)
                 || obj.ReferenceEquals(options.Redaction, null)
+                || obj.ReferenceEquals(options.Layout, null)
             then
-                fail "SCN001" "Scene options, limits, theme and redaction must not be null."
+                fail "SCN001" "Scene options, limits, theme, redaction and layout must not be null."
 
             let defaults = SceneLimits.defaults
 
@@ -144,6 +159,83 @@ module Scene =
             "truncated", List.ofSeq values
         | QueryStatus.Cancelled -> "cancelled", []
         | QueryStatus.Failed _ -> "failed", []
+
+    let private compactLayout
+        guard
+        (admitted: ResizeArray<DrawingDirective * bigint * bigint>)
+        origin
+        finish
+        plotX
+        plotWidth
+        =
+        guard ()
+
+        let sorted =
+            admitted
+            |> Seq.map (fun (_, first, last) -> first, last)
+            |> Seq.sort
+            |> Seq.toArray
+
+        guard ()
+        let merged = ResizeArray<bigint * bigint>()
+
+        for first, last in sorted do
+            guard ()
+
+            if merged.Count = 0 then
+                merged.Add(first, last)
+            else
+                let previous, previousEnd = merged[merged.Count - 1]
+
+                if first <= previousEnd then
+                    merged[merged.Count - 1] <- previous, max previousEnd last
+                else
+                    merged.Add(first, last)
+
+        let leading = fst merged[0] > origin
+        let trailing = snd merged[merged.Count - 1] < finish
+
+        let count =
+            merged.Count - 1 + (if leading then 1 else 0) + (if trailing then 1 else 0)
+
+        if count = 0 then
+            None
+        else
+            let bytes = merged |> Seq.sumBy (fun (first, last) -> last - first)
+            let gapWidth = min 12.0 (plotWidth * 0.2 / float count)
+            let dataWidth = plotWidth - float count * gapWidth
+            let ranges = ResizeArray<CompactRange>()
+            let offsets = ResizeArray<float>()
+            let mutable prefix = bigint.Zero
+            let mutable previousEnd = origin
+
+            for first, last in merged do
+                guard ()
+
+                if first > previousEnd then
+                    offsets.Add(plotX + float prefix / float bytes * dataWidth + float offsets.Count * gapWidth)
+
+                ranges.Add {
+                    Start = first
+                    Prefix = prefix
+                    GapCount = offsets.Count
+                }
+
+                prefix <- prefix + last - first
+                previousEnd <- last
+
+            if trailing then
+                offsets.Add(plotX + dataWidth + float offsets.Count * gapWidth)
+
+            guard ()
+
+            Some {
+                Ranges = ranges.ToArray()
+                Bytes = bytes
+                DataWidth = dataWidth
+                GapWidth = gapWidth
+                Offsets = List.ofSeq offsets
+            }
 
     let build options (result: QueryResult) (context: SceneExecutionContext) =
         let mutable status = SceneStatus.Complete
@@ -300,12 +392,49 @@ module Scene =
                 let plotX = 528.0
                 let plotWidth = float options.PlotWidth
 
+                let compact =
+                    if
+                        options.Layout = SceneLayout.Compact
+                        && not options.Redaction.Addresses
+                        && admitted.Count > 0
+                    then
+                        compactLayout guard admitted origin finish plotX plotWidth
+                    else
+                        None
+
                 let x offset =
-                    plotX + float (offset - origin) / float span * plotWidth
+                    match compact with
+                    | None -> plotX + float (offset - origin) / float span * plotWidth
+                    | Some layout ->
+                        // Find the containing occupied range without scanning gaps per element.
+                        let mutable low = 0
+                        let mutable high = layout.Ranges.Length - 1
+
+                        while low < high do
+                            guard ()
+                            let middle = low + (high - low + 1) / 2
+
+                            if layout.Ranges[middle].Start <= offset then
+                                low <- middle
+                            else
+                                high <- middle - 1
+
+                        let range = layout.Ranges[low]
+
+                        plotX
+                        + float (range.Prefix + offset - range.Start) / float layout.Bytes
+                          * layout.DataWidth
+                        + float range.GapCount * layout.GapWidth
+
+                let intervalWidth (size: bigint) =
+                    match compact with
+                    | None -> float size / float span * plotWidth
+                    | Some layout -> float size / float layout.Bytes * layout.DataWidth
 
                 let lanes = ResizeArray<SceneLane>()
                 let laneInfo = Dictionary<struct (int * int), SceneLane * float>()
-                let mutable top = 16.0
+                let laneTop = if compact.IsSome then 48.0 else 16.0
+                let mutable top = laneTop
 
                 for pair in laneHeights do
                     guard ()
@@ -354,7 +483,7 @@ module Scene =
                             // Fixed cells encode neither byte sizes nor relative/absolute addresses.
                             plotX + float ordinal * 24.0, 16.0
                         else
-                            x left, float (right - left) / float span * plotWidth
+                            x left, intervalWidth (right - left)
 
                     let shape = {
                         X = shapeX
@@ -550,10 +679,62 @@ module Scene =
                     })
                     |> Seq.toList
 
+                let gaps =
+                    compact
+                    |> Option.map (fun layout ->
+                        let legend = "Compressed address gaps; not linear distance."
+                        let legendWidth = float legend.Length * 8.0
+
+                        {
+                            Offsets = layout.Offsets
+                            Band = {
+                                X = 0.0
+                                Y = laneTop
+                                Width = layout.GapWidth
+                                Height = top - 16.0 - laneTop
+                            }
+                            Lines = [
+                                ({ X = layout.GapWidth * 0.25; Y = 44.0 }, { X = layout.GapWidth * 0.5; Y = 36.0 })
+                                ({ X = layout.GapWidth * 0.5; Y = 44.0 }, { X = layout.GapWidth * 0.75; Y = 36.0 })
+                            ]
+                            Style = {
+                                Fill = "#fff1cc"
+                                Stroke = "#9a6700"
+                                StrokeWidth = min 1.0 (layout.GapWidth / 8.0)
+                            }
+                            Legend = {
+                                Bounds = {
+                                    X = plotX
+                                    Y = 8.0
+                                    Width = legendWidth
+                                    Height = 14.0
+                                }
+                                Lines = [
+                                    {
+                                        Text = legend
+                                        X = plotX
+                                        Baseline = 19.0
+                                        Width = legendWidth
+                                    }
+                                ]
+                                CellWidth = 8.0
+                                FontSize = 12.0
+                                LineHeight = 14.0
+                                Fill = color options.Theme.Text
+                                ReplacedCodeUnits = 0
+                                IsTruncated = false
+                            }
+                        })
+
                 let contentRight =
                     elements
                     |> Seq.choose _.Text
                     |> Seq.fold (fun right text -> max right (text.Bounds.X + text.Bounds.Width)) (plotX + width)
+
+                let contentRight =
+                    match gaps with
+                    | Some markers -> max contentRight (markers.Legend.Bounds.X + markers.Legend.Bounds.Width)
+                    | None -> contentRight
 
                 status <-
                     if reasons.Count = 0 then
@@ -565,7 +746,7 @@ module Scene =
 
                 scene <-
                     Some {
-                        Version = 1
+                        Version = 2
                         OwningSnapshot = result.SnapshotId
                         SceneBounds = {
                             X = 0.0
@@ -574,6 +755,8 @@ module Scene =
                             Height = max 32.0 top
                         }
                         SceneLanes = finalLanes
+                        SceneLayout = options.Layout
+                        SceneGaps = gaps
                         SceneElements =
                             elements
                             |> Seq.mapi (fun index element ->

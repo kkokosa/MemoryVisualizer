@@ -94,11 +94,24 @@ export function validateRecipe(value: unknown): Recipe {
     "hiddenLayers",
     "snapshot",
   ]);
-  if (item.schemaVersion !== 1)
-    badRecipe("Unsupported recipe version. This workspace reads version 1 only.");
+  if (item.schemaVersion !== 1 && item.schemaVersion !== 2)
+    badRecipe("Unsupported recipe version. This workspace reads versions 1 and 2.");
+  const settings =
+    item.schemaVersion === 1
+      ? {
+          ...record(item.settings, [
+            "plotWidth",
+            "viewport",
+            "redaction",
+            "maxResults",
+            "maxElements",
+          ]),
+          layout: "linear",
+        }
+      : item.settings;
   const document = validateWorkspaceDocument({
     query: item.query,
-    settings: item.settings,
+    settings,
     annotations: item.annotations,
     hiddenLayers: item.hiddenLayers,
   });
@@ -128,7 +141,7 @@ export function validateRecipe(value: unknown): Recipe {
       modifiedUtc: source.modifiedUtc,
     };
   }
-  return { schemaVersion: 1, ...document, snapshot };
+  return { schemaVersion: 2, ...document, snapshot };
 }
 
 export async function identifyDump(path: string): Promise<DumpIdentity> {
@@ -172,7 +185,7 @@ export function recipeForSave(
       modifiedUtc: dump.modifiedUtc,
     };
   }
-  return validateRecipe({ schemaVersion: 1, ...document, snapshot });
+  return validateRecipe({ schemaVersion: 2, ...document, snapshot });
 }
 
 export async function recipeDependency(

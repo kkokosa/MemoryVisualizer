@@ -56,7 +56,7 @@ for (const name of ["MemoryVisualizer.Worker", "MemoryVisualizer.Cli"]) {
             assert.match(result.stdout, /--protocol --backend=fake/);
             assert.match(
               result.stdout,
-              /Protocol v1 uses explicit synthetic fixtures; v2 uses the native shared engine\./,
+              /Protocol v1 uses explicit synthetic fixtures; v3 uses the native shared engine\./,
             );
             assert.match(
               result.stdout,

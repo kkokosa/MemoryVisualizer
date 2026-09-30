@@ -80,7 +80,9 @@ let ``Global address geometry preserves gaps overlaps and explicit sorted runtim
         ]
 
     Assert.Equal(id, value.SnapshotId)
-    Assert.Equal(1, value.SchemaVersion)
+    Assert.Equal(2, value.SchemaVersion)
+    Assert.Equal(SceneLayout.Linear, value.Layout)
+    Assert.True value.Gaps.IsNone
     Assert.Equal(3, value.Lanes.Length)
 
     Assert.Equal<(int option * int option) list>(
@@ -655,11 +657,17 @@ let ``Query source completeness is orthogonal and failed cancelled unavailable s
 [<InlineData("kind-null")>]
 [<InlineData("position-null")>]
 [<InlineData("label-null")>]
+[<InlineData("layout-null")>]
 let ``Invalid scene inputs fail explicitly without partial publication`` input =
     let mutable options = SceneOptions.defaults
     let mutable item = directive 0 0 1UL 1UL
 
     match input with
+    | "layout-null" ->
+        options <- {
+            options with
+                Layout = Unchecked.defaultof<SceneLayout>
+        }
     | "kind-null" ->
         item <- {
             item with
@@ -846,5 +854,495 @@ let ``Positioned scene and SVG match deterministic versioned golden fixtures`` (
         JsonSerializer.Serialize(projected, JsonSerializerOptions(WriteIndented = true)).Replace("\r\n", "\n")
 
     let directory = Path.Combine(AppContext.BaseDirectory, "fixtures")
-    Assert.Equal(File.ReadAllText(Path.Combine(directory, "scene-v1.json")).TrimEnd(), json)
-    Assert.Equal(File.ReadAllText(Path.Combine(directory, "scene-v1.svg")).TrimEnd(), svg value)
+    Assert.Equal(File.ReadAllText(Path.Combine(directory, "scene-v2.json")).TrimEnd(), json)
+    Assert.Equal(File.ReadAllText(Path.Combine(directory, "scene-v2.svg")).TrimEnd(), svg value)
+
+let private compactOptions = {
+    SceneOptions.defaults with
+        Layout = SceneLayout.Compact
+}
+
+let private compact directives =
+    build compactOptions (query directives) |> scene
+
+[<Fact>]
+let ``Compact overview restores segment and generation widths across enormous frozen address gaps`` () =
+    let entity kind heapKind address size = {
+        directive 0 0 address size with
+            Width = if kind = Selector.Segment then 40 else 24
+            Background = if kind = Selector.Segment then "Blue" else "Grey"
+            Entity =
+                Some {
+                    Kind = kind
+                    Runtime = runtime 0
+                    Heap = 0
+                    SegmentAddress = address
+                    Address = address
+                    Size = size
+                    End = Some(address + size)
+                    TypeIdentity = None
+                    TypeName = None
+                    Generation = None
+                    IsFree = None
+                    HeapKind = heapKind
+                }
+    }
+
+    let directives = [
+        entity Selector.Segment HeapKind.Frozen 4096UL 4096UL
+        entity Selector.Generation HeapKind.Frozen 4096UL 2048UL
+        entity Selector.Segment HeapKind.Small (1UL <<< 60) 4096UL
+        entity Selector.Generation HeapKind.Small (1UL <<< 60) 2048UL
+    ]
+
+    let linear = draw directives
+    Assert.All(linear.Elements, fun item -> Assert.True(item.Bounds.Width < 0.012))
+    let value = compact directives
+    Assert.Equal(SceneLayout.Compact, value.Layout)
+    Assert.Equal(4, value.Elements.Length)
+
+    let segments =
+        value.Elements |> List.filter (fun item -> item.Source.Value.Kind = "Segment")
+
+    let generations =
+        value.Elements
+        |> List.filter (fun item -> item.Source.Value.Kind = "Generation")
+
+    Assert.All(
+        segments,
+        fun item ->
+            close 506.0 item.Bounds.Width
+            close 40.0 item.Bounds.Height
+            Assert.Equal("#0000ff", item.Style.Fill)
+    )
+
+    Assert.All(
+        generations,
+        fun item ->
+            close 253.0 item.Bounds.Width
+            close 24.0 item.Bounds.Height
+            Assert.Equal("#808080", item.Style.Fill)
+    )
+
+    Assert.Equal<float list>([ 1034.0 ], value.Gaps.Value.Offsets)
+    close 12.0 value.Gaps.Value.Band.Width
+    close 1046.0 segments[1].Bounds.X
+
+[<Fact>]
+let ``Compact global union merges overlaps touching and duplicates across lanes independent of ordering`` () =
+    let directives = [
+        directive 0 0 100UL 100UL
+        directive 0 1 150UL 100UL
+        directive 0 2 250UL 50UL
+        directive 0 3 100UL 100UL
+        directive 1 0 (1UL <<< 60) 100UL
+    ]
+
+    let value = compact directives
+    let byId = value.Elements |> List.sortBy _.Id
+    let unit = 1012.0 / 300.0
+    close 528.0 byId[0].Bounds.X
+    close (528.0 + 50.0 * unit) byId[1].Bounds.X
+    close (528.0 + 150.0 * unit) byId[2].Bounds.X
+    close byId[0].Bounds.X byId[3].Bounds.X
+    close (528.0 + 200.0 * unit + 12.0) byId[4].Bounds.X
+    close (100.0 * unit) byId[0].Bounds.Width
+    close (50.0 * unit) byId[2].Bounds.Width
+    close byId[0].Bounds.Width byId[4].Bounds.Width
+    close (528.0 + 200.0 * unit) (Assert.Single value.Gaps.Value.Offsets)
+
+    let projection (value: PositionedScene) =
+        value.Elements
+        |> List.map (fun item ->
+            let source = item.Source.Value
+            (source.Runtime, source.Heap, source.Address), item.Bounds)
+        |> List.sortBy fst
+
+    let reversed = compact (List.rev directives)
+    Assert.Equal<_ list>(projection value, projection reversed)
+    Assert.Equal(value.Gaps, reversed.Gaps)
+    Assert.Equal<SceneLane list>(value.Lanes, reversed.Lanes)
+
+[<Fact>]
+let ``Compact without empty gaps preserves all linear geometry and adds no header`` () =
+    let directives = [
+        directive 0 0 10UL 10UL
+        directive 0 1 20UL 10UL
+        directive 0 2 15UL 10UL
+        directive 0 0 10UL 10UL
+    ]
+
+    let linear = draw directives
+    let value = compact directives
+    Assert.True value.Gaps.IsNone
+    Assert.Equal(linear.Bounds, value.Bounds)
+    Assert.Equal<SceneLane list>(linear.Lanes, value.Lanes)
+    Assert.Equal<SceneElement list>(linear.Elements, value.Elements)
+    Assert.Equal((svg linear).Replace("data-address-layout=\"relative\"", "data-address-layout=\"compact\""), svg value)
+
+[<Fact>]
+let ``Compact explicit viewport compresses leading internal and trailing gaps`` () =
+    let value =
+        build
+            {
+                compactOptions with
+                    Viewport = Some { Start = 1000UL; Size = 1000UL }
+            }
+            (query [
+                directive 0 0 1100UL 100UL
+                directive 0 1 1600UL 200UL
+                directive 0 2 999UL 1UL
+                directive 0 3 2000UL 1UL
+            ])
+        |> scene
+
+    Assert.Equal(2, value.Elements.Length)
+    let markers = value.Gaps.Value
+    Assert.Equal(3, markers.Offsets.Length)
+    close 528.0 markers.Offsets[0]
+    close 540.0 value.Elements[0].Bounds.X
+    close (988.0 / 3.0) value.Elements[0].Bounds.Width
+    close (540.0 + 988.0 / 3.0) markers.Offsets[1]
+    close (552.0 + 988.0 / 3.0) value.Elements[1].Bounds.X
+    close (988.0 * 2.0 / 3.0) value.Elements[1].Bounds.Width
+    close 1540.0 markers.Offsets[2]
+    Assert.All(value.Elements, fun item -> Assert.False item.IsClipped)
+
+[<Fact>]
+let ``Compact clips before union and pins use the shared clipped start`` () =
+    let value =
+        build
+            {
+                compactOptions with
+                    Viewport = Some { Start = 1000UL; Size = 1000UL }
+            }
+            (query [
+                directive 0 0 900UL 250UL
+                directive 0 1 1900UL 150UL
+                {
+                    directive 0 0 900UL 250UL with
+                        Kind = DrawingKind.Pin
+                }
+            ])
+        |> scene
+
+    close 528.0 value.Elements[0].Bounds.X
+    close (1012.0 * 150.0 / 250.0) value.Elements[0].Bounds.Width
+    close (528.0 + 1012.0 * 150.0 / 250.0 + 12.0) value.Elements[1].Bounds.X
+    close (1012.0 * 100.0 / 250.0) value.Elements[1].Bounds.Width
+    close 528.0 value.Elements[2].Bounds.X
+    close 0.0 value.Elements[2].Bounds.Width
+    Assert.Single value.Gaps.Value.Offsets |> ignore
+    Assert.All(value.Elements, fun item -> Assert.True item.IsClipped)
+    Assert.Equal("250", value.Elements[0].Source.Value.Size)
+    Assert.Equal("150", value.Elements[1].Source.Value.Size)
+
+[<Fact>]
+let ``Compact uses exact bigint union sizes through two to64 and never invents minimum byte widths`` () =
+    let value =
+        compact [
+            directive 0 0 0UL 1UL
+            directive 0 1 (UInt64.MaxValue - 1UL) 2UL
+            directive 0 2 UInt64.MaxValue 1UL
+        ]
+
+    close (1012.0 / 3.0) value.Elements[0].Bounds.Width
+    close (1012.0 * 2.0 / 3.0) value.Elements[1].Bounds.Width
+    close (1012.0 / 3.0) value.Elements[2].Bounds.Width
+    close (528.0 + 12.0 + 1012.0 * 2.0 / 3.0) value.Elements[2].Bounds.X
+    close (528.0 + 1024.0) (value.Elements[2].Bounds.X + value.Elements[2].Bounds.Width)
+
+    let tiny =
+        compact [ directive 0 0 0UL (1UL <<< 63); directive 0 0 UInt64.MaxValue 1UL ]
+
+    Assert.True(tiny.Elements[1].Bounds.Width > 0.0)
+    Assert.True(tiny.Elements[1].Bounds.Width < 1e-12)
+    Assert.Equal(1012.0 / float ((bigint.One <<< 63) + bigint.One), tiny.Elements[1].Bounds.Width)
+
+[<Fact>]
+let ``Compact empty ranges viewports and clipped out selections remain valid without markers`` () =
+    for viewport, directives in
+        [
+            None, []
+            None, [ directive 0 0 100UL 0UL ]
+            Some { Start = 100UL; Size = 0UL }, [ directive 0 0 100UL 10UL ]
+            Some { Start = 100UL; Size = 100UL }, [ directive 0 0 1UL 1UL ]
+        ] do
+        let value =
+            build
+                {
+                    compactOptions with
+                        Viewport = viewport
+                }
+                (query directives)
+            |> scene
+
+        Assert.True value.Gaps.IsNone
+        Assert.Empty value.Elements
+        Assert.Empty value.Lanes
+        close 32.0 value.Bounds.Height
+        Assert.Contains("data-address-layout=\"compact\"", svg value)
+
+[<Theory>]
+[<InlineData(3, 64)>]
+[<InlineData(1024, 1024)>]
+[<InlineData(4096, 1024)>]
+let ``Compact maximum marker counts reserve at least eighty percent for globally proportional data`` count plotWidth =
+    let value =
+        build
+            {
+                compactOptions with
+                    PlotWidth = plotWidth
+                    Viewport =
+                        Some {
+                            Start = 0UL
+                            Size = uint64 (count * 2 + 1)
+                        }
+            }
+            (query [
+                for index in 0 .. count - 1 -> directive 0 (index % 64) (uint64 (index * 2 + 1)) 1UL
+            ])
+        |> scene
+
+    let markers = value.Gaps.Value
+    Assert.Equal(count, value.Elements.Length)
+    Assert.Equal(count + 1, markers.Offsets.Length)
+    Assert.Equal(min count 64, value.Lanes.Length)
+    close (min 12.0 (float plotWidth * 0.2 / float (count + 1))) markers.Band.Width
+    let dataWidth = value.Elements |> List.sumBy _.Bounds.Width
+    Assert.True(dataWidth >= float plotWidth * 0.8 - 1e-8)
+    close (float plotWidth) (dataWidth + float markers.Offsets.Length * markers.Band.Width)
+    close (528.0 + float plotWidth) (List.last markers.Offsets + markers.Band.Width)
+    Assert.Equal(2, markers.Lines.Length)
+    Assert.Single markers.Legend.Lines |> ignore
+
+[<Theory>]
+[<InlineData("directives")>]
+[<InlineData("elements")>]
+[<InlineData("lanes")>]
+let ``Compact union only uses admitted ranges within each budget`` budget =
+    let limits, expected =
+        match budget with
+        | "directives" ->
+            {
+                SceneLimits.defaults with
+                    MaxDirectives = 2
+            },
+            SceneTruncation.Directives
+        | "elements" ->
+            {
+                SceneLimits.defaults with
+                    MaxElements = 2
+            },
+            SceneTruncation.Elements
+        | _ ->
+            {
+                SceneLimits.defaults with
+                    MaxLanes = 2
+            },
+            SceneTruncation.Lanes
+
+    let accepted = [ directive 0 0 1UL 10UL; directive 0 1 1000UL 10UL ]
+    let invalidTail = List.replicate 100000 Unchecked.defaultof<DrawingDirective>
+
+    let result =
+        build { compactOptions with Limits = limits } (query (accepted @ (directive 0 2 100UL 100UL :: invalidTail)))
+
+    Assert.Equal(SceneStatus.Truncated [ expected ], result.Status)
+    let value = result.Scene.Value
+    let baseline = compact accepted
+    Assert.Equal<SceneElement list>(baseline.Elements, value.Elements)
+    Assert.Equal(baseline.Gaps, value.Gaps)
+
+[<Fact>]
+let ``Compact redaction bypasses all address-derived layout including viewport gap markers and legend`` () =
+    let options = {
+        compactOptions with
+            Redaction = {
+                RedactionPolicy.none with
+                    Addresses = true
+            }
+    }
+
+    let first =
+        build
+            {
+                options with
+                    Viewport = Some { Start = 0UL; Size = UInt64.MaxValue }
+            }
+            (query [
+                {
+                    directive 0 0 10UL 100UL with
+                        Width = 4096
+                        Label = Some(QueryValue.Unsigned 999UL)
+                }
+                directive 0 0 (1UL <<< 60) 10UL
+            ])
+        |> scene
+
+    let second =
+        build options (query [ directive 6 9 (UInt64.MaxValue - 1UL) 1UL; directive 6 9 UInt64.MaxValue 1UL ])
+        |> scene
+
+    let linear =
+        build
+            {
+                options with
+                    Layout = SceneLayout.Linear
+            }
+            (query [ directive 6 9 1UL 1UL; directive 6 9 2UL 1UL ])
+        |> scene
+
+    Assert.True first.Gaps.IsNone
+    Assert.True second.Gaps.IsNone
+    Assert.Equal(svg first, svg second)
+    Assert.Equal(svg linear, svg second)
+    Assert.Equal(first.Bounds, second.Bounds)
+    let output = svg first
+    Assert.Contains("data-address-layout=\"schematic\"", output)
+    Assert.DoesNotContain("address-gap", output)
+    Assert.DoesNotContain("Compressed", output)
+    Assert.DoesNotContain(SnapshotId.format id, output)
+    Assert.DoesNotContain("data-address=", output)
+    Assert.DoesNotContain("data-size=", output)
+
+[<Theory>]
+[<InlineData(6)>]
+[<InlineData(7)>]
+[<InlineData(8)>]
+[<InlineData(11)>]
+[<InlineData(15)>]
+[<InlineData(20)>]
+let ``Compact sorting merging and positioning obey cancellation elapsed and stale snapshot checks`` stop =
+    for failure in [ "cancel"; "elapsed"; "stale" ] do
+        use cancellation = new CancellationTokenSource()
+        let clock = Clock()
+        let mutable checks = 0
+
+        let ctx = {
+            SceneExecutionContext.create cancellation.Token with
+                TimeProvider = clock
+                IsSnapshotCurrent =
+                    fun _ ->
+                        checks <- checks + 1
+
+                        if checks = stop then
+                            if failure = "cancel" then
+                                cancellation.Cancel()
+
+                            if failure = "elapsed" then
+                                clock.Timestamp <- 5000L
+
+                        not (checks = stop && failure = "stale")
+        }
+
+        let result =
+            Scene.build
+                compactOptions
+                (query [ directive 0 0 1UL 1UL; directive 0 1 100UL 1UL; directive 0 2 10000UL 1UL ])
+                ctx
+
+        Assert.True result.Scene.IsNone
+
+        Assert.Equal(
+            (match failure with
+             | "cancel" -> SceneStatus.Cancelled
+             | "elapsed" -> SceneStatus.Truncated [ SceneTruncation.ElapsedTime ]
+             | _ -> SceneStatus.Failed),
+            result.Status
+        )
+
+[<Fact>]
+let ``Compact SVG instantiates only shared marker primitives and one positioned legend with stable bytes`` () =
+    let options = { compactOptions with PlotWidth = 64 }
+
+    let directives = [
+        directive 1 0 UInt64.MaxValue 1UL
+        directive 0 0 1UL 1UL
+        directive 0 1 100UL 1UL
+    ]
+
+    let value = build options (query directives) |> scene
+    let markers = value.Gaps.Value
+    let output = svg value
+    Assert.Equal(output, build options (query directives) |> scene |> svg)
+    let originalCulture = CultureInfo.CurrentCulture
+
+    try
+        CultureInfo.CurrentCulture <- CultureInfo.GetCultureInfo "fr-FR"
+        Assert.Equal(output, svg value)
+    finally
+        CultureInfo.CurrentCulture <- originalCulture
+
+    let ns = XNamespace.Get "http://www.w3.org/2000/svg"
+    let document = XDocument.Parse output
+    Assert.Equal("compact", document.Root.Attribute(XName.Get "data-address-layout").Value)
+    let children = document.Root.Elements() |> Seq.toList
+    Assert.Equal(ns + "rect", children.Head.Name)
+    Assert.Equal(value.Theme.Background, children.Head.Attribute(XName.Get "fill").Value)
+
+    let childIndex id =
+        children
+        |> List.findIndex (fun element ->
+            let attribute = element.Attribute(XName.Get "id")
+            not (isNull attribute) && attribute.Value = id)
+
+    let groups =
+        document.Descendants(ns + "g")
+        |> Seq.filter (fun element ->
+            let kind = element.Attribute(XName.Get "data-kind")
+            not (isNull kind) && kind.Value = "address-gap")
+        |> Seq.toList
+
+    Assert.Equal(markers.Offsets.Length, groups.Length)
+    Assert.True(childIndex "lane-0" > groups.Length)
+    close 0.0 markers.Band.X
+    close value.Lanes.Head.Bounds.Y markers.Band.Y
+    let lastLane = List.last value.Lanes
+    Assert.True(childIndex "element-0" > childIndex lastLane.Id)
+    close (lastLane.Bounds.Y + lastLane.Bounds.Height) (markers.Band.Y + markers.Band.Height)
+    Assert.True(markers.Legend.Bounds.X + markers.Legend.Bounds.Width < value.Bounds.Width)
+    Assert.True(markers.Legend.Bounds.Y + markers.Legend.Bounds.Height < value.Lanes.Head.Bounds.Y)
+
+    let number (value: float) =
+        value.ToString("G17", CultureInfo.InvariantCulture)
+
+    for index, group in groups |> List.indexed do
+        Assert.Same(group, children[index + 1])
+        Assert.Equal($"address-gap-{index}", group.Attribute(XName.Get "id").Value)
+        Assert.Equal("translate(" + number markers.Offsets[index] + ",0)", group.Attribute(XName.Get "transform").Value)
+        Assert.Equal("none", group.Attribute(XName.Get "pointer-events").Value)
+        Assert.Null(group.Attribute(XName.Get "data-address"))
+        Assert.Null(group.Attribute(XName.Get "data-lane"))
+        let rectangle = Assert.Single(group.Elements(ns + "rect"))
+        Assert.Equal(number markers.Band.X, rectangle.Attribute(XName.Get "x").Value)
+        Assert.Equal(number markers.Band.Y, rectangle.Attribute(XName.Get "y").Value)
+        Assert.Equal(number markers.Band.Width, rectangle.Attribute(XName.Get "width").Value)
+        Assert.Equal(number markers.Band.Height, rectangle.Attribute(XName.Get "height").Value)
+        Assert.Equal(markers.Style.Fill, rectangle.Attribute(XName.Get "fill").Value)
+        Assert.Equal("none", rectangle.Attribute(XName.Get "stroke").Value)
+        let lines = group.Elements(ns + "line") |> Seq.toList
+        Assert.Equal(markers.Lines.Length, lines.Length)
+
+        for line, (first, last) in List.zip lines markers.Lines do
+            Assert.Equal(number first.X, line.Attribute(XName.Get "x1").Value)
+            Assert.Equal(number first.Y, line.Attribute(XName.Get "y1").Value)
+            Assert.Equal(number last.X, line.Attribute(XName.Get "x2").Value)
+            Assert.Equal(number last.Y, line.Attribute(XName.Get "y2").Value)
+            Assert.Equal("none", line.Attribute(XName.Get "fill").Value)
+            Assert.Equal(markers.Style.Stroke, line.Attribute(XName.Get "stroke").Value)
+            Assert.Equal(number markers.Style.StrokeWidth, line.Attribute(XName.Get "stroke-width").Value)
+            Assert.True(first.Y >= 0.0 && last.Y < value.Bounds.Height)
+
+    let legend = Assert.Single(document.Descendants(ns + "text"))
+    Assert.Equal("url(#address-layout-legend-text-clip)", legend.Parent.Attribute(XName.Get "clip-path").Value)
+    Assert.Null(legend.Parent.Attribute(XName.Get "transform"))
+    Assert.Same(document.Root, legend.Parent.Parent)
+    let clip = Assert.Single(document.Descendants(ns + "clipPath"))
+    Assert.Equal("address-layout-legend-text-clip", clip.Attribute(XName.Get "id").Value)
+    Assert.Equal(markers.Legend.Lines.Head.Text, legend.Value)
+    Assert.Contains("Compressed address gaps", legend.Value)
+    Assert.Contains("not linear distance", legend.Value)
+    Assert.Equal(number markers.Legend.Lines.Head.X, legend.Attribute(XName.Get "x").Value)
+    Assert.Equal(number markers.Legend.Lines.Head.Baseline, legend.Attribute(XName.Get "y").Value)
+    Assert.All(legend.Value, fun ch -> Assert.InRange(int ch, 32, 126))

@@ -24,7 +24,7 @@ const document: WorkspaceDocument = {
 };
 function recipe() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ...document,
     snapshot: {
       locator: "example.dmp",
@@ -37,7 +37,8 @@ function recipe() {
 test("recipe exact version/schema, portable locator and uint64 are data", () => {
   assert.deepEqual(validateRecipe(recipe()), recipe());
   for (const value of [
-    { ...recipe(), schemaVersion: 2 },
+    { ...recipe(), schemaVersion: 3 },
+    { ...recipe(), settings: { ...document.settings, layout: "auto" } },
     { ...recipe(), dacPath: "evil.dll" },
     { ...recipe(), settings: { ...document.settings, script: "evil" } },
     {
@@ -92,8 +93,8 @@ test("bounded strict UTF-8 JSON rejects duplicate keys, oversized files and nest
     const path = join(folder, "input.mvrecipe");
     const valid = JSON.stringify(recipe());
     for (const bytes of [
-      Buffer.from(valid.replace('"schemaVersion":1', '"schemaVersion":2,"schemaVersion":1')),
-      Buffer.from(valid.replace('"schemaVersion":1', '"schemaVersion":1,"schema\\u0056ersion":1')),
+      Buffer.from(valid.replace('"schemaVersion":2', '"schemaVersion":3,"schemaVersion":2')),
+      Buffer.from(valid.replace('"schemaVersion":2', '"schemaVersion":2,"schema\\u0056ersion":2')),
       Buffer.from(valid.replace('"query":', '"query":"x","query":')),
       Buffer.from(`{"x":${"[".repeat(18)}0${"]".repeat(18)}}`),
       Buffer.from([0xff]),
@@ -105,6 +106,33 @@ test("bounded strict UTF-8 JSON rejects duplicate keys, oversized files and nest
     }
     await writeFile(path, `${valid}${" ".repeat(MAX_RECIPE_BYTES - Buffer.byteLength(valid))}`);
     assert.deepEqual(await readRecipe(path), recipe());
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("legacy recipe v1 migrates explicitly to linear without losing document data", async () => {
+  const { layout: _layout, ...legacySettings } = document.settings;
+  const legacy = { ...recipe(), schemaVersion: 1, settings: legacySettings };
+  const migrated = {
+    ...recipe(),
+    settings: { ...document.settings, layout: "linear" },
+  };
+  assert.deepEqual(validateRecipe(legacy), migrated);
+  assert.throws(() => validateRecipe({ ...legacy, settings: document.settings }));
+  assert.throws(() => validateRecipe({ ...recipe(), settings: legacySettings }));
+  const folder = await mkdtemp(join(tmpdir(), "MemoryVisualizer-recipe-migration-"));
+  try {
+    const original = join(folder, "legacy.mvrecipe");
+    const saved = join(folder, "upgraded.mvrecipe");
+    const bytes = JSON.stringify(legacy);
+    await writeFile(original, bytes);
+    const opened = await readRecipe(original);
+    assert.deepEqual(opened, migrated);
+    await writeRecipe(saved, opened);
+    assert.deepEqual(await readRecipe(saved), migrated);
+    assert.equal(JSON.parse(await readFile(saved, "utf8")).schemaVersion, 2);
+    assert.equal(await readFile(original, "utf8"), bytes);
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

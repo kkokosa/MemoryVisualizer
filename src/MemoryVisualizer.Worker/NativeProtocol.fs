@@ -133,7 +133,14 @@ module NativeProtocol =
         UInt64.Parse(raw.Substring(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture)
 
     let private settings value =
-        fields [ "plotWidth"; "viewport"; "redaction"; "maxResults"; "maxElements" ] value
+        fields [ "layout"; "plotWidth"; "viewport"; "redaction"; "maxResults"; "maxElements" ] value
+
+        let layout =
+            match field "layout" value |> text 1 7 with
+            | "linear" -> SceneLayout.Linear
+            | "compact" -> SceneLayout.Compact
+            | _ -> invalid ()
+
         let redact = field "redaction" value
         fields [ "addresses"; "strings"; "paths"; "labels" ] redact
 
@@ -150,6 +157,7 @@ module NativeProtocol =
             MaxResults = field "maxResults" value |> number 1UL 4096UL
             Scene = {
                 SceneOptions.defaults with
+                    Layout = layout
                     PlotWidth = field "plotWidth" value |> number 64UL 4096UL
                     Viewport = viewport
                     Redaction = {
@@ -220,7 +228,7 @@ module NativeProtocol =
             false
             (fun root ->
                 let version () =
-                    field "version" root |> number 2UL 2UL |> ignore
+                    field "version" root |> number 3UL 3UL |> ignore
 
                 match field "tag" root |> text 1 32 with
                 | "hello" ->
@@ -228,7 +236,7 @@ module NativeProtocol =
                     let versions = field "versions" root
                     require (versions.ValueKind = JsonValueKind.Array)
 
-                    if versions.GetArrayLength() <> 1 || versions[0].GetRawText() <> "2" then
+                    if versions.GetArrayLength() <> 1 || versions[0].GetRawText() <> "3" then
                         raise (ProtocolFailure "UnsupportedVersion")
 
                     let extensions = field "extensions" root
@@ -324,7 +332,7 @@ module NativeProtocol =
                 match field "tag" root |> text 1 32 with
                 | "fatal" -> fields [ "tag"; "code"; "message" ] root
                 | tag ->
-                    field "version" root |> number 2UL 2UL |> ignore
+                    field "version" root |> number 3UL 3UL |> ignore
 
                     match tag with
                     | "ready" -> fields [ "tag"; "version"; "capabilities" ] root
@@ -348,9 +356,11 @@ module NativeProtocol =
     let ready () =
         encode {|
             tag = "ready"
-            version = 2
+            version = 3
             capabilities = {|
                 backend = "native"
+                sceneSchemaVersion = 2
+                layouts = [| "linear"; "compact" |]
                 operations = [|
                     "snapshot.load"
                     "snapshot.dispose"
@@ -372,7 +382,7 @@ module NativeProtocol =
             |}
         |}
 
-    let bye () = encode {| tag = "bye"; version = 2 |}
+    let bye () = encode {| tag = "bye"; version = 3 |}
 
     let message =
         function
@@ -404,7 +414,7 @@ module NativeProtocol =
     let error (request: NativeRequest) code =
         encode {|
             tag = "error"
-            version = 2
+            version = 3
             requestId = Protocol.idValue request.Id
             snapshotId = Option.toObj request.Snapshot
             error = {|
@@ -417,7 +427,7 @@ module NativeProtocol =
     let success (request: NativeRequest) scope (result: obj) =
         encode {|
             tag = "success"
-            version = 2
+            version = 3
             requestId = Protocol.idValue request.Id
             snapshotId = Option.toObj scope
             result = result
@@ -426,7 +436,7 @@ module NativeProtocol =
     let progress (request: NativeRequest) phase completed =
         encode {|
             tag = "progress"
-            version = 2
+            version = 3
             requestId = Protocol.idValue request.Id
             snapshotId = Option.toObj request.Snapshot
             phase = phase

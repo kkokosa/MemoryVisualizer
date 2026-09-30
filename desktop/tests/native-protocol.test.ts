@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FrameDecoder, encodeFrame } from "../src/framing.js";
+import { FrameDecoder, decodeFrame, encodeFrame } from "../src/framing.js";
 import {
   parseNativeInbound,
   parseNativeOutbound,
@@ -16,13 +16,20 @@ import {
   type NativeResult,
   type SceneElement,
   type SceneInfo,
+  type SceneGapMarkers,
 } from "../src/native-types.js";
 import { parseInbound, parseOutbound } from "../src/protocol.js";
 
 const snapshotId = "00000000-0000-0000-0000-000000000001";
 const queryId = "2";
 const sceneId = "3";
-const capabilities = { backend: "native", operations: NATIVE_OPERATIONS, limits: NATIVE_LIMITS };
+const capabilities = {
+  backend: "native",
+  sceneSchemaVersion: 2,
+  layouts: ["linear", "compact"],
+  operations: NATIVE_OPERATIONS,
+  limits: NATIVE_LIMITS,
+};
 const bounds = { x: -0.5, y: 0, width: 1024.25, height: 80 };
 const entity: Entity = {
   kind: "Object",
@@ -40,7 +47,9 @@ const entity: Entity = {
   isFree: false,
 };
 const scene: SceneInfo = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  layout: "compact",
+  gaps: null,
   sceneId,
   snapshotId,
   bounds,
@@ -79,6 +88,25 @@ const element: SceneElement = {
     methodTable: null,
   },
   isClipped: false,
+};
+const gapMarkers: SceneGapMarkers = {
+  offsets: [0, 123.45678901234567],
+  band: { x: 1.5, y: 16, width: 4.5, height: 32 },
+  lines: [
+    { start: { x: 1.5, y: 16 }, finish: { x: 3, y: 48 } },
+    { start: { x: 4.5, y: 16 }, finish: { x: 6, y: 48 } },
+  ],
+  style: { fill: "#ffffff", stroke: "#202020", strokeWidth: 1 },
+  legend: {
+    bounds: { x: 0, y: 0, width: 160, height: 16 },
+    lines: [{ text: "Address gaps omitted", x: 0, baseline: 12, width: 160 }],
+    cellWidth: 8,
+    fontSize: 12,
+    lineHeight: 16,
+    fill: "#202020",
+    replacedCodeUnits: 0,
+    isTruncated: false,
+  },
 };
 const operations: NativeOperation[] = [
   {
@@ -143,32 +171,32 @@ const results: NativeResult[] = [
 ];
 const success = (result: unknown) => ({
   tag: "success",
-  version: 2,
+  version: 3,
   requestId: "1",
   snapshotId,
   result,
 });
 const inbound = (operation: unknown): Record<string, unknown> => ({
   tag: "request",
-  version: 2,
+  version: 3,
   requestId: "1",
   ...(operation as object),
 });
 const invalid = (action: () => unknown) => assert.throws(action, { code: "ProtocolViolation" });
 
-test("native v2 operations, result variants and control frames round-trip independently of v1", () => {
+test("native v3 operations, result variants and control frames round-trip independently of v1", () => {
   const inputs = [
-    { tag: "hello", versions: [2], extensions: [] },
+    { tag: "hello", versions: [3], extensions: [] },
     ...operations.map(inbound),
-    { tag: "cancel", version: 2, requestId: "18446744073709551615" },
-    { tag: "shutdown", version: 2 },
+    { tag: "cancel", version: 3, requestId: "18446744073709551615" },
+    { tag: "shutdown", version: 3 },
   ];
   const outputs = [
-    { tag: "ready", version: 2, capabilities },
+    { tag: "ready", version: 3, capabilities },
     ...results.map(success),
     {
       tag: "progress",
-      version: 2,
+      version: 3,
       requestId: "1",
       snapshotId: null,
       phase: "import",
@@ -176,13 +204,13 @@ test("native v2 operations, result variants and control frames round-trip indepe
     },
     {
       tag: "error",
-      version: 2,
+      version: 3,
       requestId: "1",
       snapshotId,
       error: { code: "ImportFailed", message: "Could not import.", retryable: false },
     },
     { tag: "fatal", code: "InvalidFrame", message: "Invalid frame." },
-    { tag: "bye", version: 2 },
+    { tag: "bye", version: 3 },
   ];
   for (const input of inputs) assert.deepEqual(parseNativeInbound(input), input);
   for (const output of outputs) {
@@ -196,8 +224,13 @@ test("native v2 operations, result variants and control frames round-trip indepe
   }
   assert.throws(() => parseInbound(inbound(operations[0])));
   assert.throws(() => parseOutbound(success(results[0])));
-  invalid(() => parseNativeInbound({ tag: "hello", versions: [1, 2], extensions: [] }));
-  invalid(() => parseNativeInbound({ tag: "hello", versions: [2], extensions: ["native.extra"] }));
+  invalid(() => parseNativeInbound({ tag: "hello", versions: [1, 3], extensions: [] }));
+  invalid(() => parseNativeInbound({ tag: "hello", versions: [3], extensions: ["native.extra"] }));
+  invalid(() => parseNativeInbound({ tag: "hello", versions: [2], extensions: [] }));
+  for (const input of inputs.filter((value) => "version" in value))
+    invalid(() => parseNativeInbound({ ...input, version: 2 }));
+  for (const output of outputs.filter((value) => "version" in value))
+    invalid(() => parseNativeOutbound({ ...output, version: 2 }));
 });
 
 test("native fields, discriminants, capability order and limits are exact", () => {
@@ -216,12 +249,16 @@ test("native fields, discriminants, capability order and limits are exact", () =
   }
   for (const caps of [
     { ...capabilities, backend: "fake" },
+    { ...capabilities, sceneSchemaVersion: 1 },
+    { ...capabilities, layouts: ["compact", "linear"] },
+    { ...capabilities, layouts: ["linear"] },
+    { ...capabilities, layouts: ["linear", "compact", "auto"] },
     { ...capabilities, extensions: [] },
     { ...capabilities, operations: [...NATIVE_OPERATIONS].reverse() },
     { ...capabilities, limits: { ...NATIVE_LIMITS, maxPageSize: 128 } },
     { ...capabilities, limits: { ...NATIVE_LIMITS, extra: 1 } },
   ])
-    invalid(() => parseNativeOutbound({ tag: "ready", version: 2, capabilities: caps }));
+    invalid(() => parseNativeOutbound({ tag: "ready", version: 3, capabilities: caps }));
   invalid(() => parseNativeOutbound(success({ tag: "page", items: [], nextCursor: null })));
   invalid(() => parseNativeInbound(inbound({ operation: "query", snapshotId, args: {} })));
 });
@@ -410,6 +447,10 @@ test("settings and workspace documents reject undeclared fields and bound persis
     { start: "0", size: "0" },
   );
   for (const settings of [
+    { ...DEFAULT_SETTINGS, layout: undefined },
+    { ...DEFAULT_SETTINGS, layout: "auto" },
+    { ...DEFAULT_SETTINGS, layout: "Compact" },
+    Object.fromEntries(Object.entries(DEFAULT_SETTINGS).filter(([key]) => key !== "layout")),
     { ...DEFAULT_SETTINGS, plotWidth: 63 },
     { ...DEFAULT_SETTINGS, plotWidth: 4097 },
     { ...DEFAULT_SETTINGS, maxResults: 4097 },
@@ -419,8 +460,20 @@ test("settings and workspace documents reject undeclared fields and bound persis
     { ...DEFAULT_SETTINGS, viewport: { start: "18446744073709551615", size: "2" } },
     { ...DEFAULT_SETTINGS, redaction: { ...DEFAULT_SETTINGS.redaction, paths: "false" } },
     { ...DEFAULT_SETTINGS, redaction: { ...DEFAULT_SETTINGS.redaction, extra: false } },
-  ])
+  ]) {
     invalid(() => validateSettings(settings));
+    invalid(() => validateWorkspaceDocument({ ...document, settings }));
+    invalid(() =>
+      parseNativeInbound(
+        inbound({
+          operation: "query.run",
+          snapshotId,
+          args: { text: "MATCH (o:Object) RETURN o", settings },
+        }),
+      ),
+    );
+  }
+  assert.equal(validateSettings({ ...DEFAULT_SETTINGS, layout: "linear" }).layout, "linear");
   for (const bad of [
     { ...document, extra: true },
     { ...document, query: "x".repeat(16385) },
@@ -706,10 +759,10 @@ test("validators reject exotic records without invoking getters", () => {
 
 test("native framing keeps duplicate keys, invalid Unicode, depth and byte limits closed", () => {
   const invalidFrames = [
-    '{"tag":"bye","tag":"bye","version":2}\n',
+    '{"tag":"bye","tag":"bye","version":3}\n',
     '{"tag":"fatal","code":"InvalidFrame","message":"\\ud800"}\n',
-    '{"tag":"bye","version":2}\r\n',
-    '{"tag":"bye","version":2.0,"n":1e999}\n',
+    '{"tag":"bye","version":3}\r\n',
+    '{"tag":"bye","version":3.0,"n":1e999}\n',
     " ".repeat(NATIVE_LIMITS.maxFrameBytes + 1),
   ];
   for (const frame of invalidFrames)
@@ -721,11 +774,11 @@ test("native framing keeps duplicate keys, invalid Unicode, depth and byte limit
 
 test("native coordinate number mode never relaxes integer count or identity tokens", () => {
   for (const frame of [
-    '{"tag":"bye","version":2.0}\n',
-    '{"tag":"bye","version":2e0}\n',
-    '{"tag":"success","version":2,"requestId":1,"snapshotId":null,"result":{}}\n',
-    '{"tag":"success","version":2,"requestId":"1","snapshotId":null,"result":{"rowCount":1e0}}\n',
-    '{"tag":"success","version":2,"requestId":"1","snapshotId":null,"result":{"rowCount":9007199254740992}}\n',
+    '{"tag":"bye","version":3.0}\n',
+    '{"tag":"bye","version":3e0}\n',
+    '{"tag":"success","version":3,"requestId":1,"snapshotId":null,"result":{}}\n',
+    '{"tag":"success","version":3,"requestId":"1","snapshotId":null,"result":{"rowCount":1e0}}\n',
+    '{"tag":"success","version":3,"requestId":"1","snapshotId":null,"result":{"rowCount":9007199254740992}}\n',
   ]) {
     assert.throws(() => {
       for (const value of new FrameDecoder(true).push(Buffer.from(frame))) {
@@ -738,4 +791,111 @@ test("native coordinate number mode never relaxes integer count or identity toke
   assert.deepEqual(new FrameDecoder(true).push(coordinates), [
     { bounds: { x: -0.5, y: 1e-7, width: 2.5, height: 3 } },
   ]);
+});
+
+test("compact gap offsets round-trip only in explicit native framing mode", () => {
+  const message = success({ ...results[2], scene: { ...scene, gaps: gapMarkers } });
+  const bytes = encodeFrame(parseNativeOutbound(message), parseNativeOutbound);
+  assert.deepEqual(new FrameDecoder(true).push(bytes), [message]);
+  assert.throws(() => new FrameDecoder().push(bytes), { code: "InvalidFrame" });
+  const floats = Buffer.from('{"offsets":[-1.25,1e-7,1024.0000000001]}');
+  assert.deepEqual(decodeFrame(floats, true), { offsets: [-1.25, 1e-7, 1024.0000000001] });
+  assert.throws(() => decodeFrame(floats), { code: "InvalidFrame" });
+  for (const raw of [
+    '{"offsets":[1e999]}',
+    '{"offsets":[-0]}',
+    '{"offsets":[-0.0]}',
+    '{"offsets":[[0.5]]}',
+    '{"offsets":0.5}',
+    '{"other":[0.5]}',
+    '{"offsets":[1,1],"version":3.0}',
+  ])
+    assert.throws(() => decodeFrame(Buffer.from(raw), true), { code: "InvalidFrame" });
+});
+
+test("scene schema, layouts and gap decorations are strict and cannot leak redacted addresses", () => {
+  const accept = (value: unknown) => parseNativeOutbound(success({ ...results[2], scene: value }));
+  for (const layout of ["linear", "compact"])
+    assert.equal(accept({ ...scene, layout, gaps: null }).tag, "success");
+  assert.equal(accept({ ...scene, gaps: gapMarkers }).tag, "success");
+  for (const bad of [
+    { ...scene, schemaVersion: 1 },
+    { ...scene, layout: undefined },
+    { ...scene, layout: "auto" },
+    { ...scene, gaps: undefined },
+    { ...scene, layout: "linear", gaps: gapMarkers },
+    { ...scene, gaps: gapMarkers, redaction: { ...scene.redaction, addresses: true } },
+    {
+      ...scene,
+      lanes: Array.from({ length: 65 }, (_, index) => ({ ...scene.lanes[0], id: `lane-${index}` })),
+    },
+  ])
+    invalid(() => accept(bad));
+  for (const gaps of [
+    { ...gapMarkers, extra: true },
+    { ...gapMarkers, source: element.source },
+    { ...gapMarkers, offsets: undefined },
+    { ...gapMarkers, offsets: Array.from({ length: 1026 }, () => 1) },
+    ...[NaN, Infinity, -Infinity, -0, Number.MAX_SAFE_INTEGER + 1, "1", null, {}].map((offset) => ({
+      ...gapMarkers,
+      offsets: [offset],
+    })),
+    { ...gapMarkers, band: { ...gapMarkers.band, width: -1 } },
+    { ...gapMarkers, band: { ...gapMarkers.band, y: NaN } },
+    { ...gapMarkers, band: { ...gapMarkers.band, source: element.source } },
+    { ...gapMarkers, lines: Array.from({ length: 3 }, () => gapMarkers.lines[0]) },
+    { ...gapMarkers, lines: [{ ...gapMarkers.lines[0], source: element.source }] },
+    { ...gapMarkers, lines: [{ start: { x: 0, y: Infinity }, finish: { x: 0, y: 0 } }] },
+    { ...gapMarkers, style: { ...gapMarkers.style, strokeWidth: -1 } },
+    { ...gapMarkers, style: { ...gapMarkers.style, fill: "\ud800" } },
+    { ...gapMarkers, style: { ...gapMarkers.style, stroke: "x".repeat(129) } },
+    {
+      ...gapMarkers,
+      legend: {
+        ...gapMarkers.legend,
+        lines: [gapMarkers.legend.lines[0], gapMarkers.legend.lines[0]],
+      },
+    },
+    {
+      ...gapMarkers,
+      legend: {
+        ...gapMarkers.legend,
+        lines: [{ ...gapMarkers.legend.lines[0], text: "x".repeat(129) }],
+      },
+    },
+    { ...gapMarkers, legend: { ...gapMarkers.legend, source: element.source } },
+  ])
+    invalid(() => accept({ ...scene, gaps }));
+});
+
+test("1025 packed gap offsets and 64 lanes fit in one bounded native scene header", () => {
+  const sceneHeader = {
+    ...scene,
+    gaps: { ...gapMarkers, offsets: Array.from({ length: 1025 }, (_, index) => index * Math.PI) },
+    lanes: Array.from({ length: 64 }, (_, index) => ({
+      id: `lane-${index}`,
+      runtime: 0,
+      heap: index,
+      bounds: { x: 24.12345678901234, y: index * 96.5, width: 4096.123456789012, height: 80.5 },
+    })),
+    elementCount: 1024,
+  };
+  const message = success({ ...results[2], scene: sceneHeader });
+  const bytes = encodeFrame(parseNativeOutbound(message), parseNativeOutbound);
+  assert.ok(bytes.byteLength < 65536, `Header is ${bytes.byteLength} bytes`);
+  assert.deepEqual(new FrameDecoder(true).push(bytes), [message]);
+  const oversized = success({
+    ...results[2],
+    scene: sceneHeader,
+    diagnostics: Array.from({ length: 16 }, () => ({
+      code: "MQL001",
+      message: "x".repeat(4096),
+      span: { offset: 0, length: 1, line: 1, column: 1 },
+    })),
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(oversized)) > 65536);
+  invalid(() => parseNativeOutbound(oversized));
+  assert.throws(() => new FrameDecoder(true).push(Buffer.from(`${JSON.stringify(oversized)}\n`)), {
+    code: "InvalidFrame",
+  });
 });

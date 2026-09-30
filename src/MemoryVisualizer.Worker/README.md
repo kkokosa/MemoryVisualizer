@@ -1,9 +1,11 @@
 # Native worker
 
 Run the built worker with `--protocol --backend=native`. The native handshake
-requires exactly `{"tag":"hello","versions":[2],"extensions":[]}`. Its wire
+requires exactly `{"tag":"hello","versions":[3],"extensions":[]}`. Its wire
 contract is `desktop/src/native-types.ts`; it does not extend the closed,
-explicitly synthetic `--backend=fake` v1 protocol.
+explicitly synthetic `--backend=fake` v1 protocol. Native v2 is rejected, not
+reinterpreted. Ready capabilities declare `sceneSchemaVersion: 2` and
+`layouts: ["linear", "compact"]`; all versioned native messages use v3.
 
 ## Trust and completeness
 
@@ -22,6 +24,19 @@ Queries use `Mql.prepare`, `Mql.bind`, `Mql.execute`, and `Scene.build`.
 Scene pages carry the shared engine's resolved geometry, text, style, and
 source association. The browser must not recompute layout. Optional DTO fields
 are explicit JSON `null`; target addresses and sizes remain strings.
+Current query settings require an exact `layout: "linear" | "compact"`:
+the desktop defaults to compact, while shared/headless scene defaults remain
+linear. Missing or unknown layouts are errors (legacy recipe migration belongs
+to the desktop host, not this protocol).
+
+Scene schema 2 includes the selected layout and nullable `gaps`. Compact gap
+markers carry at most 1,025 precomputed x-translation offsets for one positioned
+band/two-line glyph template and one short global legend. The browser repeats
+that template at those offsets without recomputing the address mapping; it
+never receives duplicated geometry per break or source associations for
+decorations. Linear scenes and address-redacted scenes have `gaps: null`.
+Fractional scene coordinates and offset-array numbers are native-only; the
+synthetic v1 frame grammar remains strict integer-only.
 Scene failures without publishable geometry return `SceneFailed`,
 `SceneTruncated`, or `Cancelled`; only diagnosed query failures may carry a
 null scene in a query result. Detail lookup rejects inconsistent segment/type
@@ -53,7 +68,9 @@ are rejected. Pages contain at most 32 items and are additionally byte bounded.
 Each candidate item is serialized into a bounded buffer. An individually
 oversized item returns `OutputLimit`, never an empty page with the same cursor.
 Queries retain at most 4,096 rows and 64 columns; scenes contain at most 1,024
-elements and keep the shared scene label budgets.
+elements, at most 64 lanes, and keep the shared scene label budgets. Compact
+header offsets (including all 1,025 breaks plus 64 lanes) fit in one 64 KiB
+frame; aggregate serialization still rejects any over-budget header.
 
 Import progress retains only the latest phase/counter and emits at most once
 per 100 ms. Cancellation is cooperative; the worker's finite request timer
